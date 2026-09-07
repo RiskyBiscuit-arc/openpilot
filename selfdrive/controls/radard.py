@@ -37,9 +37,65 @@ HONDA_BOSCH_A_CHALLENGER_STALE_CYCLES = 2
 HONDA_BOSCH_A_GROSS_DISTANCE_STALE_CYCLES = 3
 HONDA_BOSCH_A_GROSS_DISTANCE_M = 25.0
 
+# Bosch-A U11 is already conditioned upstream and U10 rises with both velocity error and genuine
+# dynamics. Keep U11 authoritative for closing speed, while smoothly reducing only the acceleration
+# correction when a sudden negative innovation arrives with weak supporting evidence. The floors
+# preserve response to a real braking lead; dRel/vRel/TTC paths remain untouched.
+HONDA_BOSCH_A_U10_FULL_WEIGHT = 96.0
+HONDA_BOSCH_A_U10_MIN_WEIGHT_AT = 511.0
+HONDA_BOSCH_A_U10_MIN_WEIGHT = 0.35
+HONDA_BOSCH_A_RESIDUAL_FULL_WEIGHT_MPS = 0.5
+HONDA_BOSCH_A_RESIDUAL_MIN_WEIGHT_AT_MPS = 3.0
+HONDA_BOSCH_A_RESIDUAL_MIN_WEIGHT = 0.25
+HONDA_BOSCH_A_NEGATIVE_INNOVATION_START_MPS = 0.35
+HONDA_BOSCH_A_NEGATIVE_INNOVATION_FULL_MPS = 2.0
+HONDA_BOSCH_A_ACCEL_INNOVATION_FLOOR_MPS = -2.0
+HONDA_BOSCH_A_MEASUREMENT_AGE_FULL_WEIGHT_S = HONDA_BOSCH_A_RADAR_TS
+HONDA_BOSCH_A_MEASUREMENT_AGE_MIN_WEIGHT_S = 0.20
+HONDA_BOSCH_A_MEASUREMENT_AGE_MIN_WEIGHT = 0.25
+HONDA_BOSCH_A_VREL_SOURCE_DIRECT = 1
+HONDA_BOSCH_A_VREL_UNCERTAINTY_UNAVAILABLE = 0xFFFF
+
 
 def is_bosch_a_radar_car(CP) -> bool:
   return CP.brand == "honda" and CP.carFingerprint in HONDA_BOSCH_A and not CP.radarUnavailable
+
+
+def honda_bosch_a_accel_weight(*, innovation: float, uncertainty_raw: int,
+                               closing_residual: float, measurement_age: float) -> float:
+  """Confidence for the acceleration-state correction, never for raw vRel/TTC."""
+  if innovation >= -HONDA_BOSCH_A_NEGATIVE_INNOVATION_START_MPS:
+    return 1.0
+
+  shock = float(np.interp(
+    -innovation,
+    [HONDA_BOSCH_A_NEGATIVE_INNOVATION_START_MPS, HONDA_BOSCH_A_NEGATIVE_INNOVATION_FULL_MPS],
+    [0.0, 1.0],
+  ))
+
+  if uncertainty_raw == HONDA_BOSCH_A_VREL_UNCERTAINTY_UNAVAILABLE:
+    u10_weight = 1.0
+  else:
+    u10_weight = float(np.interp(
+      uncertainty_raw,
+      [HONDA_BOSCH_A_U10_FULL_WEIGHT, HONDA_BOSCH_A_U10_MIN_WEIGHT_AT],
+      [1.0, HONDA_BOSCH_A_U10_MIN_WEIGHT],
+    ))
+
+  residual_weight = float(np.interp(
+    max(0.0, closing_residual),
+    [HONDA_BOSCH_A_RESIDUAL_FULL_WEIGHT_MPS, HONDA_BOSCH_A_RESIDUAL_MIN_WEIGHT_AT_MPS],
+    [1.0, HONDA_BOSCH_A_RESIDUAL_MIN_WEIGHT],
+  )) if math.isfinite(closing_residual) else 1.0
+
+  age_weight = float(np.interp(
+    max(0.0, measurement_age),
+    [HONDA_BOSCH_A_MEASUREMENT_AGE_FULL_WEIGHT_S, HONDA_BOSCH_A_MEASUREMENT_AGE_MIN_WEIGHT_S],
+    [1.0, HONDA_BOSCH_A_MEASUREMENT_AGE_MIN_WEIGHT],
+  ))
+
+  evidence_weight = min(u10_weight, residual_weight, age_weight)
+  return 1.0 - shock * (1.0 - evidence_weight)
 
 
 # Adjacent-lane stopped-vehicle detector, used as a stop-line hint on red-light
@@ -85,6 +141,8 @@ class Track:
     self.K_C = kalman_params.C
     self.K_K = kalman_params.K
     self.kf = KF1D([[v_lead], [0.0]], self.K_A, self.K_C, self.K_K)
+    self.accelKalmanWeight = 1.0
+    self.radarMeasurementAge = 0.0
 
     self.leadTrackID = 0
 
@@ -94,7 +152,8 @@ class Track:
     self.seen_moving = False
 
   def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float, measured: bool,
-             measurement_update: bool | None = None):
+             measurement_update: bool | None = None, accel_weight: float = 1.0,
+             measurement_age: float = 0.0):
     # relative values, copy
     self.dRel = d_rel   # LONG_DIST
     self.yRel = y_rel   # -LAT_DIST
@@ -110,9 +169,21 @@ class Track:
       # adapter supplies an explicit False only for a duplicate Civic Bosch payload.
       measurement_update = True
 
+    if measurement_update:
+      self.accelKalmanWeight = accel_weight
+      self.radarMeasurementAge = measurement_age
+
     # computed velocity and accelerations
     if measurement_update and self.cnt > 0:
+      old_speed = self.kf.x0_0
+      old_accel = self.kf.x1_0
+      innovation = self.vLead - old_speed
       self.kf.update(self.vLead)
+      if accel_weight < 1.0 and innovation < 0.0:
+        # Preserve the ordinary KF speed update exactly. Bound and weight only the negative
+        # acceleration correction; positive recovery remains immediate so braking can release.
+        accel_innovation = max(innovation, HONDA_BOSCH_A_ACCEL_INNOVATION_FLOOR_MPS)
+        self.kf.x1_0 = old_accel + self.kf.K1_0 * accel_innovation * accel_weight
 
     self.vLeadK = float(self.kf.x[SPEED][0])
     self.aLeadK = float(self.kf.x[ACCEL][0])
@@ -155,6 +226,8 @@ class Track:
       "modelProb": model_prob,
       "radar": True,
       "radarTrackId": self.identifier,
+      "accelKalmanWeight": float(self.accelKalmanWeight),
+      "radarMeasurementAge": float(self.radarMeasurementAge),
     }
 
   def potential_adjacent_lead(self, left: bool, standstill: bool, model_data: capnp._DynamicStructReader):
@@ -533,7 +606,7 @@ class RadarD:
       radar_fresh = sm.recv_frame['liveTracks'] != self._last_tracks_frame
       self._last_tracks_frame = sm.recv_frame['liveTracks']
 
-    ar_pts = {pt.trackId: [pt.dRel, pt.yRel, pt.vRel, pt.measured] for pt in rr.points}
+    ar_pts = {pt.trackId: pt for pt in rr.points}
 
     # *** remove missing points from meta data ***
     for ids in list(self.tracks.keys()):
@@ -543,16 +616,28 @@ class RadarD:
     # *** compute the tracks ***
     for ids, rpt in ar_pts.items():
       # align v_ego by a fixed time to align it with the radar measurement
-      v_lead = rpt[2] + self.v_ego_hist[0]
+      v_lead = rpt.vRel + self.v_ego_hist[0]
 
       # create the track if it doesn't exist or it's a new track
       if ids not in self.tracks:
         self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
-      measured = rpt[3] if not self.honda_bosch_a_radar else bool(rpt[3] and radar_fresh)
+      measured = rpt.measured if not self.honda_bosch_a_radar else bool(rpt.measured and radar_fresh)
       # Non-Bosch sources retain the historical per-model-cycle update semantics. Only Civic Bosch
       # suppresses duplicate measurement updates when liveTracks has not advanced.
       measurement_update = True if not self.honda_bosch_a_radar else measured
-      self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, measured, measurement_update)
+      accel_weight = 1.0
+      measurement_age = 0.0
+      if self.honda_bosch_a_radar and measurement_update and int(rpt.vRelSource) == HONDA_BOSCH_A_VREL_SOURCE_DIRECT:
+        innovation = v_lead - self.tracks[ids].kf.x0_0
+        measurement_age = max(0.0, self.current_time - int(rpt.measurementTime) * 1e-9)
+        accel_weight = honda_bosch_a_accel_weight(
+          innovation=innovation,
+          uncertainty_raw=int(rpt.vRelUncertainty),
+          closing_residual=float(rpt.vRelResidual),
+          measurement_age=measurement_age,
+        )
+      self.tracks[ids].update(rpt.dRel, rpt.yRel, rpt.vRel, v_lead, measured, measurement_update,
+                              accel_weight=accel_weight, measurement_age=measurement_age)
 
     # *** publish radarState ***
     self.radar_state_valid = sm.all_checks()

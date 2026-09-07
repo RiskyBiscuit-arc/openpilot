@@ -15,7 +15,9 @@ def make_toggles():
   )
 
 
-def make_radar_data(v_rel=0.0, *, track_id=1, d_rel=7.0, y_rel=0.0, measured=True):
+def make_radar_data(v_rel=0.0, *, track_id=1, d_rel=7.0, y_rel=0.0, measured=True,
+                    vrel_source=0, uncertainty=0xffff, range_rate=float('nan'),
+                    measurement_time=0):
   rr = car.RadarData.new_message()
   point = rr.init('points', 1)[0]
   point.trackId = track_id
@@ -23,6 +25,12 @@ def make_radar_data(v_rel=0.0, *, track_id=1, d_rel=7.0, y_rel=0.0, measured=Tru
   point.yRel = y_rel
   point.vRel = v_rel
   point.measured = measured
+  point.rawVRel = v_rel
+  point.vRelUncertainty = uncertainty
+  point.rangeRate = range_rate
+  point.vRelResidual = range_rate - v_rel
+  point.measurementTime = measurement_time
+  point.vRelSource = vrel_source
   return rr
 
 
@@ -180,6 +188,69 @@ def test_non_honda_bosch_a_radars_keep_per_model_cycle_update_semantics(monkeypa
   radar_d.update(sm, make_radar_data(measured=False))
   radar_d.update(sm, make_radar_data(measured=False, v_rel=2.0))
   assert radar_d.tracks[1].cnt == 2
+
+
+def test_bosch_accel_weight_only_changes_abrupt_negative_innovations():
+  calm = radard.honda_bosch_a_accel_weight(
+    innovation=-0.2, uncertainty_raw=511, closing_residual=3.0, measurement_age=0.2,
+  )
+  release = radard.honda_bosch_a_accel_weight(
+    innovation=2.0, uncertainty_raw=511, closing_residual=3.0, measurement_age=0.2,
+  )
+  weak = radard.honda_bosch_a_accel_weight(
+    innovation=-2.0, uncertainty_raw=511, closing_residual=3.0, measurement_age=0.2,
+  )
+  stopped_car_rail = radard.honda_bosch_a_accel_weight(
+    innovation=-5.0, uncertainty_raw=90, closing_residual=-6.0, measurement_age=0.0,
+  )
+  assert calm == 1.0
+  assert release == 1.0
+  assert weak == pytest.approx(radard.HONDA_BOSCH_A_RESIDUAL_MIN_WEIGHT)
+  assert stopped_car_rail == 1.0
+
+
+def test_bosch_robust_update_preserves_speed_but_reduces_acceleration_spike():
+  params = radard.KalmanParams(radard.HONDA_BOSCH_A_RADAR_TS)
+  ordinary = radard.Track(1, 20.0, params)
+  robust = radard.Track(1, 20.0, params)
+  ordinary.update(20.0, 0.0, 0.0, 20.0, True, True)
+  robust.update(20.0, 0.0, 0.0, 20.0, True, True)
+
+  ordinary.update(19.8, 0.0, -4.0, 16.0, True, True)
+  robust.update(19.8, 0.0, -4.0, 16.0, True, True, accel_weight=0.25)
+
+  assert robust.vRel == ordinary.vRel
+  assert robust.vLeadK == pytest.approx(ordinary.vLeadK)
+  assert abs(robust.aLeadK) < abs(ordinary.aLeadK)
+  expected = params.K[1][0] * radard.HONDA_BOSCH_A_ACCEL_INNOVATION_FLOOR_MPS * 0.25
+  assert robust.aLeadK == pytest.approx(expected)
+
+
+def test_bosch_radar_d_uses_point_quality_for_acceleration_only(monkeypatch):
+  toggles = make_toggles()
+  monkeypatch.setattr(radard, "get_starpilot_toggles", lambda *_args: toggles)
+  radar_d = radard.RadarD(honda_bosch_a_radar=True)
+  sm = FakeSubMaster(live_tracks_frame=1)
+  radar_d.update(sm, make_radar_data(
+    v_rel=0.0, vrel_source=radard.HONDA_BOSCH_A_VREL_SOURCE_DIRECT,
+    uncertainty=0, range_rate=0.0, measurement_time=1_000_000_000,
+  ))
+
+  sm.recv_frame['liveTracks'] = 2
+  radar_d.update(sm, make_radar_data(
+    v_rel=-4.0, vrel_source=radard.HONDA_BOSCH_A_VREL_SOURCE_DIRECT,
+    uncertainty=511, range_rate=-1.0, measurement_time=1_000_000_000,
+  ))
+  track = radar_d.tracks[1]
+  assert track.vRel == -4.0
+  assert track.aLeadK > -0.5
+  assert track.accelKalmanWeight < 1.0
+  assert track.get_RadarState()["accelKalmanWeight"] == track.accelKalmanWeight
+  applied_weight = track.accelKalmanWeight
+
+  # A duplicate model-cycle read must retain diagnostics from the last physical sweep.
+  radar_d.update(sm, make_radar_data(v_rel=-4.0))
+  assert track.accelKalmanWeight == applied_weight
 
 
 def test_bosch_close_new_candidate_does_not_replace_established_lead():

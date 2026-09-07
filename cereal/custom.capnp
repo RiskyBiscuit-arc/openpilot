@@ -258,6 +258,8 @@ struct StarPilotRadarState @0xb86e6369214c01c8 {
     modelProb @13 :Float32;
     radar @14 :Bool;
     radarTrackId @15 :Int32 = -1;
+    accelKalmanWeight @16 :Float32 = 1;
+    radarMeasurementAge @17 :Float32;
 
     aLeadDEPRECATED @5 :Float32;
   }

@@ -800,6 +800,8 @@ struct RadarState @0x9a185389d6fdd05f {
     modelProb @13 :Float32;
     radar @14 :Bool;
     radarTrackId @15 :Int32 = -1;
+    accelKalmanWeight @16 :Float32 = 1;
+    radarMeasurementAge @17 :Float32;
 
     aLeadDEPRECATED @5 :Float32;
   }

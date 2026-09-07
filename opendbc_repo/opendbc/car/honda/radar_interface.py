@@ -186,6 +186,17 @@ BOSCH_A_VREL_MAX_SAMPLES = 8
 # ~15 Hz cadence, 0.20 s is approximately three missed sweeps.
 BOSCH_A_STALE_S = 0.20
 
+# RadarPoint.vRelSource values for the Bosch-A implementation. These deliberately remain local to
+# Honda until the underlying Bosch descriptors have authoritative names. Zero is reserved by the
+# cross-platform schema for "unspecified".
+BOSCH_A_VREL_SOURCE_DIRECT = 1
+BOSCH_A_VREL_SOURCE_RANGE_RATIO = 2
+BOSCH_A_VREL_SOURCE_COAST_HIGH_UNCERTAINTY = 3
+BOSCH_A_VREL_SOURCE_COAST_RANGE_INCONSISTENT = 4
+BOSCH_A_VREL_SOURCE_COAST_RANGE_REJECTED = 5
+BOSCH_A_VREL_SOURCE_COAST_UNAVAILABLE = 6
+BOSCH_A_VREL_UNCERTAINTY_UNAVAILABLE = 0xFFFF
+
 
 @dataclass
 class _BoschASlotState:
@@ -346,6 +357,20 @@ class RadarInterface(RadarInterfaceBase):
     for track_id, track in list(self._tracks.items()):
       if track.last_seen_nanos is not None and (now - track.last_seen_nanos) * 1e-9 > BOSCH_A_STALE_S:
         self._bosch_a_retire_track(track_id)
+
+  @staticmethod
+  def _set_bosch_a_point_diagnostics(point, *, now: int, raw_vrel: float | None,
+                                     uncertainty_raw: int | None, range_rate: float | None,
+                                     source: int) -> None:
+    """Attach motion-quality evidence without changing the published safety vRel."""
+    point.rawVRel = raw_vrel if raw_vrel is not None and math.isfinite(raw_vrel) else float('nan')
+    point.vRelUncertainty = (int(uncertainty_raw) if uncertainty_raw is not None
+                             else BOSCH_A_VREL_UNCERTAINTY_UNAVAILABLE)
+    point.rangeRate = range_rate if range_rate is not None and math.isfinite(range_rate) else float('nan')
+    point.vRelResidual = (range_rate - raw_vrel if range_rate is not None and raw_vrel is not None and
+                          math.isfinite(range_rate) and math.isfinite(raw_vrel) else float('nan'))
+    point.measurementTime = now
+    point.vRelSource = source
 
   def _update(self, updated_messages):
     if self.bosch_a_radar:
@@ -536,6 +561,7 @@ class RadarInterface(RadarInterfaceBase):
       previous_sample = track.samples[-1] if track.samples else None
       fallback_vrel = 0.0
       ratio_vrel = None
+      range_rate = None
       range_rejected = False
       degraded = _bosch_a_measurement_degraded(
         observation['range_sigma_raw'], observation['existence_raw'], direct_vrel_uncertainty_raw,
@@ -572,6 +598,11 @@ class RadarInterface(RadarInterfaceBase):
         point = self.pts.get(track_id)
         if accepted_fresh and point is not None:
           point.measured = False
+          self._set_bosch_a_point_diagnostics(
+            point, now=now, raw_vrel=live_direct_vrel,
+            uncertainty_raw=direct_vrel_uncertainty_raw, range_rate=range_rate,
+            source=BOSCH_A_VREL_SOURCE_COAST_RANGE_REJECTED,
+          )
         else:
           self.pts.pop(track_id, None)
         track.prev_frame_idx = idx0
@@ -598,9 +629,9 @@ class RadarInterface(RadarInterfaceBase):
           d_mean = sum(ds) / n
           denom = sum((t - t_mean) ** 2 for t in ts)
           if denom > 1e-9:
-            rate = sum((t - t_mean) * (d - d_mean) for t, d in zip(ts, ds)) / denom
+            range_rate = sum((t - t_mean) * (d - d_mean) for t, d in zip(ts, ds, strict=True)) / denom
             # One-sided: only U11 claiming MORE closing than the range supports is a fault.
-            vrel_inconsistent = vrel_candidate < rate - BOSCH_A_VREL_RATE_CHECK_MAX_DISAGREEMENT_MPS
+            vrel_inconsistent = vrel_candidate < range_rate - BOSCH_A_VREL_RATE_CHECK_MAX_DISAGREEMENT_MPS
 
       if high_u10_live_vrel or vrel_inconsistent:
         # The range cleared innovation checking above, so geometry here is trustworthy; only vRel is
@@ -615,6 +646,13 @@ class RadarInterface(RadarInterfaceBase):
             point.yRel = yRel
             point.vRel = track.last_trusted_vrel
             point.measured = False
+            coast_source = (BOSCH_A_VREL_SOURCE_COAST_HIGH_UNCERTAINTY if high_u10_live_vrel
+                            else BOSCH_A_VREL_SOURCE_COAST_RANGE_INCONSISTENT)
+            self._set_bosch_a_point_diagnostics(
+              point, now=now, raw_vrel=live_direct_vrel,
+              uncertainty_raw=direct_vrel_uncertainty_raw, range_rate=range_rate,
+              source=coast_source,
+            )
         else:
           track.last_trusted_vrel = None
           track.last_trusted_vrel_nanos = None
@@ -652,6 +690,11 @@ class RadarInterface(RadarInterfaceBase):
             point.yRel = yRel
             point.vRel = track.last_trusted_vrel
             point.measured = False
+            self._set_bosch_a_point_diagnostics(
+              point, now=now, raw_vrel=live_direct_vrel,
+              uncertainty_raw=direct_vrel_uncertainty_raw, range_rate=range_rate,
+              source=BOSCH_A_VREL_SOURCE_COAST_UNAVAILABLE,
+            )
         else:
           track.last_trusted_vrel = None
           track.last_trusted_vrel_nanos = None
@@ -697,6 +740,12 @@ class RadarInterface(RadarInterfaceBase):
         self.pts[track_id].yRel = yRel
         self.pts[track_id].vRel = vRel
         self.pts[track_id].measured = True
+        self._set_bosch_a_point_diagnostics(
+          self.pts[track_id], now=now, raw_vrel=live_direct_vrel,
+          uncertainty_raw=direct_vrel_uncertainty_raw, range_rate=range_rate,
+          source=(BOSCH_A_VREL_SOURCE_DIRECT if direct_vrel is not None
+                  else BOSCH_A_VREL_SOURCE_RANGE_RATIO),
+        )
       else:
         self.pts.pop(track_id, None)
 

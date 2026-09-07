@@ -324,6 +324,17 @@ struct RadarData @0x888ad6581cf0aacb {
 
     # some radars flag measurements VS estimates
     measured @6 :Bool;
+
+    # Optional source diagnostics for radar implementations whose velocity and range
+    # arrive through distinct measurement paths. vRel remains the authoritative value
+    # used for closing-speed/TTC calculations; these fields let radard qualify only its
+    # derived acceleration state without hiding or rewriting that safety measurement.
+    rawVRel @7 :Float32;                 # m/s; NaN when unavailable
+    vRelUncertainty @8 :UInt16;          # source-native raw uncertainty; 0xffff when unavailable
+    rangeRate @9 :Float32;               # m/s from multi-sweep accepted range; NaN when unavailable
+    vRelResidual @10 :Float32;           # rangeRate - rawVRel; positive means vRel claims more closing
+    measurementTime @11 :UInt64;         # source monotonic timestamp, nanoseconds
+    vRelSource @12 :UInt8;               # source-specific enum; zero means unspecified
   }
 
   enum ErrorDEPRECATED {

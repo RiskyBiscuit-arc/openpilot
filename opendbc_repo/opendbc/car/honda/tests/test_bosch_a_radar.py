@@ -26,6 +26,10 @@ from opendbc.car.honda.radar_interface import (
   BOSCH_A_STALE_S,
   BOSCH_A_SWEEP_END_MSG,
   BOSCH_A_TRIGGER_MSG,
+  BOSCH_A_VREL_RATE_CHECK_MAX_DISAGREEMENT_MPS,
+  BOSCH_A_VREL_SOURCE_COAST_HIGH_UNCERTAINTY,
+  BOSCH_A_VREL_SOURCE_COAST_RANGE_INCONSISTENT,
+  BOSCH_A_VREL_SOURCE_DIRECT,
   _bosch_a_aux_id,
   _bosch_a_direct_vrel,
   _bosch_a_main_base,
@@ -687,6 +691,9 @@ class TestVrel:
     assert rr.points[0].dRel == pytest.approx(1705 * BOSCH_A_RANGE_SCALE_M + BOSCH_A_RANGE_OFFSET_M)
     assert rr.points[0].vRel == pytest.approx(-2.625)
     assert not rr.points[0].measured
+    assert rr.points[0].rawVRel == pytest.approx((585 - 864) / 64.0)
+    assert rr.points[0].vRelUncertainty == 744
+    assert rr.points[0].vRelSource == BOSCH_A_VREL_SOURCE_COAST_HIGH_UNCERTAINTY
     assert len(ri._tracks[1].samples) == 2
 
   def test_qualified_u11_recovers_immediately_after_high_u10_coast(self):
@@ -786,6 +793,10 @@ class TestVrel:
     range_implied_vrel = (d2 - d1) / 0.05
     assert range_implied_vrel != pytest.approx(0.0)
     assert rr.points[0].vRel == pytest.approx(0.0)  # native U11 (864 -> 0 m/s), not the range rate
+    assert rr.points[0].rawVRel == pytest.approx(0.0)
+    assert rr.points[0].vRelUncertainty == 0
+    assert rr.points[0].measurementTime == 50_000_000
+    assert rr.points[0].vRelSource == BOSCH_A_VREL_SOURCE_DIRECT
 
   def test_incarnation_does_not_carry_velocity_across_lifecycle_break(self):
     ri = make_radar_interface()
@@ -836,6 +847,10 @@ class TestVrel:
     # Coasted, not the contradictory value, and flagged unmeasured.
     assert rr.points[0].vRel == pytest.approx(40 / 64.0)
     assert not rr.points[0].measured
+    assert rr.points[0].rawVRel == pytest.approx(-11.0)
+    assert rr.points[0].rangeRate > 0.0
+    assert rr.points[0].vRelResidual > BOSCH_A_VREL_RATE_CHECK_MAX_DISAGREEMENT_MPS
+    assert rr.points[0].vRelSource == BOSCH_A_VREL_SOURCE_COAST_RANGE_INCONSISTENT
     # Geometry is still live -- only the velocity was in question.
     assert rr.points[0].dRel == pytest.approx(840 * BOSCH_A_RANGE_SCALE_M + BOSCH_A_RANGE_OFFSET_M)
 
