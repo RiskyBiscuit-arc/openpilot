@@ -23,8 +23,8 @@ Protocol (CCP / CAN Calibration Protocol), keyless reads:
     READ-ONLY: only 01/02/04/0F are ever sent. DNLOAD/PROGRAM are not implemented.
 
 The four things that make it reliable (learned the hard way on the Clarity):
-  1. STOP openpilot first, or pandad holds the panda in ELM327 and silently drops
-     the CRO ("no DTO" that isn't). This script ABORTS if ALLOUTPUT doesn't stick.
+  1. STOP openpilot first so this process owns Panda. The default is ELM327 with
+     OBD routing, matching eps-update.py. Mode AND parameter must read back correctly.
          sudo systemctl stop comma        # AGNOS oneshot service; stays stopped
          ps -eo args --no-headers | grep -E 'pandad' | grep -v grep | wc -l
   2. Drain the RX buffer before each send — the car bus is a ~3000 fps firehose and
@@ -36,7 +36,8 @@ The four things that make it reliable (learned the hard way on the Clarity):
      no MTA drift. Fallback UPLOAD retries must reset MTA before each attempt.
 
 SAFETY: This is live STEERING firmware. READ-ONLY. Car PARKED, ignition ON / engine
-OFF, wheels straight. ALLOUTPUT disables panda safety filtering -> only parked.
+OFF, wheels straight. ELM327 permits diagnostic IDs; optional ALLOUTPUT disables
+TX filtering. Both modes are for this parked procedure only.
 On exit, SILENT restoration is attempted; device/power failures can prevent it.
 
 USAGE (on the comma, after `sudo systemctl stop comma`):
@@ -85,13 +86,14 @@ def _safety_mode(attr, enum_name, fallback):
 
 ALLOUTPUT = _safety_mode("SAFETY_ALLOUTPUT", "allOutput", 17)
 SILENT    = _safety_mode("SAFETY_SILENT",    "silent",    0)
+ELM327    = _safety_mode("SAFETY_ELM327",    "elm327",    3)
 
 # ---------------- Honda EPS CCP config ----------------
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import eps_profiles
 
-CRO_TRY   = [0x0727, 0x0646]            # family-standard first, RDX-filter guess second
+CRO_TRY   = [0x0727]                    # targeted family candidate; no guessed VSA-range fallback
 BUSES_TRY = [0, 1, 2]                   # Clarity=0, Civic/RDX=1; sweep all
 STATIONS  = [0x0000, 0x1117]            # both family-accepted CONNECT stations
 USER_MAT  = (0x00000000, 0x00080000)   # A040 geometry; other revisions unverified
@@ -102,7 +104,8 @@ C_CONNECT, C_SET_MTA, C_UPLOAD, C_SHORT_UP = 0x01, 0x02, 0x04, 0x0F
 
 
 class CCP:
-    def __init__(self, bus, cro_try=None, stations=None, verbose=True):
+    def __init__(self, bus, cro_try=None, stations=None, verbose=True,
+                 safety="elm327", routing="obd"):
         if Panda is None:
             raise RuntimeError("Could not import Panda. Run on the comma with its openpilot Python environment.")
         self.bus = bus
@@ -114,34 +117,53 @@ class CCP:
         self.dto_bus = None        # bus the reply actually came back on (may differ)
         self.cro = self.cro_try[0] # locked after discovery to whichever CRO answers
         self.use_short = True
+        self.safety_mode = ELM327 if safety == "elm327" else ALLOUTPUT
+        self.safety_param = int(routing == "normal") if safety == "elm327" else 0
+        self.closed = False
         self.p = Panda()
         try:
-            self.p.set_safety_mode(ALLOUTPUT)
-            self._assert_alloutput()
+            self.p.set_safety_mode(self.safety_mode, self.safety_param)
+            self._assert_safety()
+            print(f"[transport] {safety} mode={self.safety_mode} param={self.safety_param} "
+                  f"routing={routing if safety == 'elm327' else 'normal'}")
             self.p.can_clear(0xFFFF)
         except BaseException:
             self.close()
             raise
 
-    def _assert_alloutput(self):
+    def _assert_safety(self):
         time.sleep(0.15)
         try:
-            mode = self.p.health().get("safety_mode")
+            health = self.p.health()
+            mode = health.get("safety_mode")
+            param = health.get("safety_param")
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError("Cannot verify Panda safety mode") from exc
-        if mode is None or int(mode) != ALLOUTPUT:
+        if mode != self.safety_mode or param != self.safety_param:
             raise SystemExit(
-                f"\n*** ABORT: panda safety is {mode} (ALLOUTPUT={ALLOUTPUT}), not ALLOUTPUT.\n"
-                f"    openpilot/pandad is still running and re-asserting it -> it will DROP the\n"
-                f"    CRO (the 'no DTO' failure). Stop it first, then re-run:\n"
+                f"\n*** ABORT: requested Panda mode/param {self.safety_mode}/{self.safety_param}, "
+                f"read back {mode}/{param}. No CCP request sent.\n"
+                f"    Possible causes include another Panda owner or incompatible firmware/API.\n"
+                f"    This is not proof that pandad is running. First confirm openpilot is stopped:\n"
                 f"        sudo systemctl stop comma\n"
                 f"        ps -eo args --no-headers | grep -E 'pandad' | grep -v grep | wc -l\n")
 
     def close(self):
+        if self.closed:
+            return
+        self.closed = True
         try:
             self.p.set_safety_mode(SILENT)
+            time.sleep(0.15)
+            if self.p.health().get("safety_mode") != SILENT:
+                raise RuntimeError("SILENT did not stick in health readback")
         except Exception as exc:  # noqa: BLE001
             print(f"WARNING: could not restore Panda SILENT: {exc}", file=sys.stderr)
+        finally:
+            try:
+                self.p.close()
+            except Exception as exc:  # noqa: BLE001
+                print(f"WARNING: could not close Panda: {exc}", file=sys.stderr)
 
     def _next_ctr(self):
         self.ctr = (self.ctr + 1) & 0xFF
@@ -245,11 +267,11 @@ def _hondaish(v4):
 
 
 # ---------------- modes ----------------
-def do_probe(buses, cro_try, stations):
+def do_probe(buses, cro_try, stations, **transport):
     print(f"[probe] CCP sweep — CROs {[hex(x) for x in cro_try]}, stations "
           f"{[hex(x) for x in stations]}, DTO auto-discover")
     for bus in buses:
-        c = CCP(bus, cro_try, stations)
+        c = CCP(bus, cro_try, stations, **transport)
         try:
             if not c.connect():
                 c.close(); continue
@@ -271,7 +293,8 @@ def do_probe(buses, cro_try, stations):
                 print(f"{a:#08x}={st}", end="  ")
             print()
             print(f"\n  ==> LIVE on bus {bus}, CRO {c.cro:#06x}, DTO {c.dto:#06x}. Dump:\n"
-                  f"      python3 {sys.argv[0]} --dump eps.bin --bus {bus} --cro {c.cro:#x}")
+                  f"      python3 {sys.argv[0]} --dump eps.bin --bus {bus} --cro {c.cro:#x} "
+                  f"--safety {transport.get('safety', 'elm327')} --routing {transport.get('routing', 'obd')}")
             return 0
         finally:
             c.close()
@@ -279,11 +302,11 @@ def do_probe(buses, cro_try, stations):
     return 1
 
 
-def do_sniff(buses, cro_try, stations):
+def do_sniff(buses, cro_try, stations, **transport):
     """FULL one-shot diagnostic — a single run answers: live bus? EPS present? CRO
     reaching the wire? anything answering? on which CRO/DTO/bus?"""
     print("[sniff] FULL diagnostic — isolates ignition/harness vs bus routing vs silent EPS")
-    c = CCP(buses[0] if buses else 0, cro_try, stations, verbose=False)
+    c = CCP(buses[0] if buses else 0, cro_try, stations, verbose=False, **transport)
     p = c.p
     try:
         h = p.health()
@@ -291,7 +314,7 @@ def do_sniff(buses, cro_try, stations):
         for k in ("safety_mode", "ignition_line", "ignition_can", "car_harness_status",
                   "controls_allowed", "voltage", "rx_buffer_overflow", "safety_tx_blocked"):
             print(f"      {k:<20}= {h.get(k)}")
-        print(f"      need: safety_mode == {ALLOUTPUT} (ALLOUTPUT)  AND  ignition showing key ON")
+        print(f"      need: safety_mode == {c.safety_mode}, safety_param == {c.safety_param}, ignition ON")
 
         p.can_clear(0xFFFF)
         t0 = time.time(); by = {}
@@ -357,7 +380,7 @@ def do_sniff(buses, cro_try, stations):
     return 0
 
 
-def do_dump(start, length, outpath, buses, cro_try, stations):
+def do_dump(start, length, outpath, buses, cro_try, stations, **transport):
     os.makedirs(os.path.dirname(os.path.abspath(outpath)) or ".", exist_ok=True)
     if start < 0 or length <= 0 or start + length > 0x100000000:
         raise ValueError("Invalid 32-bit read range")
@@ -365,7 +388,7 @@ def do_dump(start, length, outpath, buses, cro_try, stations):
         raise FileExistsError(f"Refusing to append to or overwrite {outpath}; choose a fresh path")
     resume = 0
     for bus in buses:
-        c = CCP(bus, cro_try, stations)
+        c = CCP(bus, cro_try, stations, **transport)
         f = None
         try:
             if not c.connect():
@@ -410,6 +433,9 @@ def main():
     ap.add_argument("--dump", metavar="OUT")
     ap.add_argument("--sram", metavar="OUT")
     ap.add_argument("--bus", type=int, default=None)
+    ap.add_argument("--safety", choices=("elm327", "alloutput"), default="elm327")
+    ap.add_argument("--routing", choices=("obd", "normal"), default="obd",
+                    help="ELM327 bus routing: obd matches eps-update.py; normal uses param 1")
     ap.add_argument("--cro", type=lambda x: int(x, 0), default=None, help="pin a single CRO id")
     ap.add_argument("--station", type=lambda x: int(x, 0), default=None, help="pin a single CONNECT station")
     ap.add_argument("--start", type=lambda x: int(x, 0), default=None)
@@ -419,6 +445,7 @@ def main():
     ap.add_argument("--list-profiles", action="store_true",
                     help="print the known EPS variants and exit")
     a = ap.parse_args()
+    transport = {"safety": a.safety, "routing": a.routing}
 
     if getattr(a, "list_profiles", False):
         for _p in eps_profiles.PROFILES:
@@ -441,13 +468,13 @@ def main():
     print(" openpilot STOPPED (sudo systemctl stop comma). SILENT attempted on exit.")
     print("=" * 66)
     try:
-        if a.probe: return do_probe(buses, cro_try, stations)
-        if a.sniff: return do_sniff(buses, cro_try, stations)
-        if a.sram:  return do_dump(*SRAM, a.sram, buses, cro_try, stations)
+        if a.probe: return do_probe(buses, cro_try, stations, **transport)
+        if a.sniff: return do_sniff(buses, cro_try, stations, **transport)
+        if a.sram:  return do_dump(*SRAM, a.sram, buses, cro_try, stations, **transport)
         if a.dump:
             start = a.start if a.start is not None else USER_MAT[0]
             length = a.length if a.length is not None else USER_MAT[1]
-            return do_dump(start, length, a.dump, buses, cro_try, stations)
+            return do_dump(start, length, a.dump, buses, cro_try, stations, **transport)
     except KeyboardInterrupt:
         print("\n[abort] interrupted — check above for any SILENT restoration warning.")
         return 130

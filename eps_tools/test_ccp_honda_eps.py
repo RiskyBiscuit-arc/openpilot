@@ -70,16 +70,67 @@ class TransportTests(unittest.TestCase):
         modes = []
 
         class FakePanda:
-            def set_safety_mode(self, mode):
+            def set_safety_mode(self, mode, param=0):
                 modes.append(mode)
 
             def health(self):
                 return {}
 
+            def close(self):
+                pass
+
         with patch.object(ccp, "Panda", FakePanda), patch.object(ccp.time, "sleep"):
             with self.assertRaises(SystemExit):
                 ccp.CCP(0)
-        self.assertEqual(modes, [ccp.ALLOUTPUT, ccp.SILENT])
+        self.assertEqual(modes, [ccp.ELM327, ccp.SILENT])
+
+    def test_transport_modes_and_cleanup(self):
+        for safety, routing, expected in (("elm327", "obd", (3, 0)),
+                                           ("elm327", "normal", (3, 1)),
+                                           ("alloutput", "normal", (17, 0))):
+            calls = []
+
+            class FakePanda:
+                mode, param = 19, 0
+
+                def set_safety_mode(self, mode, param=0):
+                    self.mode, self.param = mode, param
+                    calls.append((mode, param))
+
+                def health(self):
+                    return {"safety_mode": self.mode, "safety_param": self.param}
+
+                def can_clear(self, bus):
+                    self.cleared = bus
+
+                def close(self):
+                    calls.append("closed")
+
+            with self.subTest(safety=safety, routing=routing):
+                with patch.object(ccp, "Panda", FakePanda), patch.object(ccp.time, "sleep"):
+                    client = ccp.CCP(1, safety=safety, routing=routing)
+                    self.assertEqual(client.p.cleared, 0xFFFF)
+                    client.close()
+                    client.close()
+                self.assertEqual(calls, [expected, (0, 0), "closed"])
+
+    def test_rejects_wrong_routing_parameter_before_can(self):
+        class FakePanda:
+            def set_safety_mode(self, mode, param=0):
+                pass
+
+            def health(self):
+                return {"safety_mode": 3, "safety_param": 0}
+
+            def close(self):
+                pass
+
+            def can_clear(self, bus):
+                raise AssertionError("Must abort before CAN access")
+
+        with patch.object(ccp, "Panda", FakePanda), patch.object(ccp.time, "sleep"):
+            with self.assertRaisesRegex(SystemExit, "requested Panda mode/param 3/1"):
+                ccp.CCP(1, routing="normal")
 
     def test_existing_dump_refused_before_panda(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
@@ -127,6 +178,8 @@ class TransportTests(unittest.TestCase):
             self.assertIn("--dump", command)
             self.assertEqual(command[command.index("--cro") + 1], "0x727")
             self.assertNotIn("--profile", command)
+            self.assertEqual(command[command.index("--safety") + 1], "elm327")
+            self.assertEqual(command[command.index("--routing") + 1], "obd")
             Path(command[command.index("--dump") + 1]).write_bytes(bytes(capture.ROM_SIZE))
 
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:

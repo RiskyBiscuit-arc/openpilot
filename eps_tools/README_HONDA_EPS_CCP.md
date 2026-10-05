@@ -38,7 +38,18 @@ Confirm all four downloads succeeded before continuing. Use the comma's normal
 Python environment; these tools require only its existing Panda package and the
 Python standard library. Keep the car parked, ignition ON, engine OFF, wheels
 straight. Nobody should need steering assistance during this procedure.
-Panda ALLOUTPUT removes its normal transmit filtering while the tool runs.
+The default transport now uses ELM327 (mode 3, parameter 0), matching the
+successful A220 UDS connection. It checks both mode and parameter readback.
+`--routing normal` selects ELM327 parameter 1 instead of OBD multiplexing;
+use the same setting for probe and capture. `--safety alloutput` retains the
+previous transport as an explicit option. Transport changes have offline tests
+only; the successful UDS exchange does not prove A220 exposes CCP.
+
+Only CRO `0x727` is attempted by default. No broad active scan is provided.
+DTO discovery listens for a response to that targeted request; it does not
+require transmitting on every possible CAN ID. Do not substitute VFN's broad
+`--scan`, or apply its THR/Odyssey unlock and pointer-window reconstruction to
+A220 without establishing that A220 has the same resolver and key algorithm.
 
 ```bash
 sudo systemctl stop comma
@@ -49,8 +60,8 @@ The process count must be zero. Then:
 
 ```bash
 cd /data/openpilot
-python3 /data/eps-a220-tools/ccp_honda_eps.py --probe --cro 0x727
-python3 /data/eps-a220-tools/dump_crv_a220.py --out-dir /data/eps-a220-capture
+python3 /data/eps-a220-tools/ccp_honda_eps.py --probe --cro 0x727 --bus 1
+python3 /data/eps-a220-tools/dump_crv_a220.py --out-dir /data/eps-a220-capture --bus 1
 ```
 
 Run the capture only if the probe shows successful data reads, not merely CONNECT.

@@ -49,6 +49,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", type=Path, required=True, help="New directory; existing paths refused")
     parser.add_argument("--bus", type=int, choices=(0, 1, 2), help="Otherwise discover on buses 0, 1, 2")
+    parser.add_argument("--safety", choices=("elm327", "alloutput"), default="elm327")
+    parser.add_argument("--routing", choices=("obd", "normal"), default="obd")
     parser.add_argument("--compare", type=Path, nargs=2, metavar=("FIRST", "SECOND"),
                         help="Offline comparison only; no Panda or vehicle access")
     args = parser.parse_args()
@@ -61,7 +63,8 @@ def main():
         for index in (1, 2):
             partial = args.out_dir / f"read-{index}.partial"
             command = [sys.executable, str(Path(__file__).with_name("ccp_honda_eps.py")),
-                       "--dump", str(partial), "--len", hex(ROM_SIZE), "--cro", "0x727"]
+                       "--dump", str(partial), "--len", hex(ROM_SIZE), "--cro", "0x727",
+                       "--safety", args.safety, "--routing", args.routing]
             if args.bus is not None:
                 command += ["--bus", str(args.bus)]
             subprocess.run(command, check=True)
@@ -71,6 +74,9 @@ def main():
             partial.rename(target)
             paths.append(target)
     report = compare_dumps(*(path.read_bytes() for path in paths))
+    report["requested_transport"] = None if args.compare else {
+        "safety": args.safety, "routing": args.routing, "bus": args.bus,
+    }
     report["tool_sha256"] = {
         name: sha256(Path(__file__).with_name(name).read_bytes())
         for name in ("dump_crv_a220.py", "ccp_honda_eps.py", "eps_profiles.py")
