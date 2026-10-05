@@ -2,6 +2,8 @@
 import importlib.util
 import io
 import json
+import shutil
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -24,6 +26,17 @@ ccp = load_ccp()
 
 
 class TransportTests(unittest.TestCase):
+    def test_single_file_help_and_profiles(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            script = Path(directory) / "ccp_honda_eps.py"
+            shutil.copyfile(Path(__file__).with_name("ccp_honda_eps.py"), script)
+            for flag in ("--help", "--list-profiles"):
+                result = subprocess.run([sys.executable, "-I", str(script), flag],
+                                        cwd=directory, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("crv", result.stdout)
+            self.assertEqual([p.name for p in Path(directory).iterdir()], ["ccp_honda_eps.py"])
+
     def test_lost_upload_resets_address(self):
         client = object.__new__(ccp.CCP)
         commands = []

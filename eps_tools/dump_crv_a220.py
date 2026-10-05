@@ -79,7 +79,7 @@ def main():
     }
     report["tool_sha256"] = {
         name: sha256(Path(__file__).with_name(name).read_bytes())
-        for name in ("dump_crv_a220.py", "ccp_honda_eps.py", "eps_profiles.py")
+        for name in ("dump_crv_a220.py", "ccp_honda_eps.py")
     }
     encoded = (json.dumps(report, indent=2) + "\n").encode()
     report_path = args.out_dir / f"capture-report-{sha256(encoded)}.json"

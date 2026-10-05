@@ -5,7 +5,8 @@ ccp_honda_eps.py — CCP ROM dumper for Honda/Acura SH72A0-family EPS, over CAN.
 Runs ON THE COMMA (ssh in, run it there). Self-contained: only needs the openpilot
 `panda` library already on the device. Read-only. Intended for SH72A0 EPS units that
 expose CCP. CRO/DTO/bus/station are auto-discovered; geometry comes from
-`eps_profiles.py` via --profile. Earlier versions were used on Clarity and CR-V
+the built-in read profiles via --profile. No companion files are required.
+Earlier versions were used on Clarity and CR-V
 A040; a retained A040 dump had a read artifact. This revision has offline tests
 only. A220 CCP availability and layout remain unverified.
 
@@ -52,15 +53,26 @@ Raw CCP dumps are analysis evidence, NEVER flash inputs. A220 is unverified.
 """
 import argparse, os, sys, time
 
+# Read geometry only; these profiles do not authorize firmware writes.
+# key -> (default bus, requested ROM bytes, evidence)
+READ_PROFILES = {
+    "clarity": (0, 0x60000, "Clarity reference geometry"),
+    "crv": (0, 0x80000, "A040 reference geometry; A220 unverified"),
+    "civic": (1, 0x80000, "INFERRED geometry"),
+    "rdx": (1, 0x80000, "INFERRED geometry"),
+}
+
+
+def print_profiles():
+    for name, (bus, length, evidence) in READ_PROFILES.items():
+        print(f"{name:8s} bus={bus} length={length:#x} [{evidence}]")
+
 for _p in ("/data/openpilot", "/data/pythonpath"):
     if os.path.isdir(_p) and _p not in sys.path:
         sys.path.insert(0, _p)
 # Informational flags must work off-comma, before the panda dependency is needed.
 if "--list-profiles" in sys.argv:
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import eps_profiles as _ep
-    for _prof in _ep.PROFILES:
-        print(_prof.describe())
+    print_profiles()
     sys.exit(0)
 
 try:
@@ -89,10 +101,6 @@ SILENT    = _safety_mode("SAFETY_SILENT",    "silent",    0)
 ELM327    = _safety_mode("SAFETY_ELM327",    "elm327",    3)
 
 # ---------------- Honda EPS CCP config ----------------
-import os as _os, sys as _sys
-_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-import eps_profiles
-
 CRO_TRY   = [0x0727]                    # targeted family candidate; no guessed VSA-range fallback
 BUSES_TRY = [0, 1, 2]                   # Clarity=0, Civic/RDX=1; sweep all
 STATIONS  = [0x0000, 0x1117]            # both family-accepted CONNECT stations
@@ -440,25 +448,24 @@ def main():
     ap.add_argument("--station", type=lambda x: int(x, 0), default=None, help="pin a single CONNECT station")
     ap.add_argument("--start", type=lambda x: int(x, 0), default=None)
     ap.add_argument("--len", dest="length", type=lambda x: int(x, 0), default=None)
-    ap.add_argument("--profile", default=None, choices=eps_profiles.keys(),
-                    help="EPS variant; supplies default --bus and --len (see eps_profiles.py)")
+    ap.add_argument("--profile", default=None, choices=READ_PROFILES,
+                    help="built-in read profile; supplies default --bus and --len")
     ap.add_argument("--list-profiles", action="store_true",
                     help="print the known EPS variants and exit")
     a = ap.parse_args()
     transport = {"safety": a.safety, "routing": a.routing}
 
     if getattr(a, "list_profiles", False):
-        for _p in eps_profiles.PROFILES:
-            print(_p.describe())
+        print_profiles()
         return 0
     if a.profile:
-        _p = eps_profiles.by_key(a.profile)
+        default_bus, default_length, evidence = READ_PROFILES[a.profile]
         if a.bus is None:
-            a.bus = _p.ccp_bus
+            a.bus = default_bus
         if a.length is None:
-            a.length = _p.mat_size
+            a.length = default_length
         print("[profile] %s: bus %s, dump length 0x%X%s"
-              % (_p.key, a.bus, a.length, "" if _p.verified else "  (UNVERIFIED profile)"))
+              % (a.profile, a.bus, a.length, "  (" + evidence + ")"))
     buses = [a.bus] if a.bus is not None else BUSES_TRY
     cro_try = [a.cro] if a.cro is not None else CRO_TRY
     stations = [a.station] if a.station is not None else STATIONS

@@ -12,7 +12,7 @@ identical firmware. A220 CCP availability, ROM geometry, controller addresses,
 code caves, checksums and patch compatibility remain unverified. Do not use
 A040 patch offsets, its RWD, or its bytes to repair an A220 capture.
 
-The capture wrapper requests 512 KiB from address zero, based on A040. It uses
+The optional capture wrapper requests 512 KiB from address zero, based on A040. It uses
 CRO `0x727`, discovers the bus/DTO/station, and reads the entire range twice
 with separate Panda sessions. It retains each complete read with its SHA-256
 in the filename, compares every byte, and writes a content-addressed JSON report.
@@ -22,19 +22,18 @@ layout assumptions, not A220 firmware identification or flash authorization.
 
 ## Get only the tools onto the comma
 
-SSH into the comma using its existing setup. These commands fetch only the four
-tool files; no branch installation, openpilot rebuild or firmware update is needed.
+SSH into the comma using its existing setup. Only `ccp_honda_eps.py` is needed
+for probing and dumping. No branch installation, openpilot rebuild or firmware
+update is needed. The Panda library must already be installed on the comma.
 Use a new directory; `mkdir` deliberately refuses to mix with a previous download.
 
 ```bash
 mkdir /data/eps-a220-tools
 cd /data/eps-a220-tools
-for file in ccp_honda_eps.py eps_profiles.py dump_crv_a220.py README_HONDA_EPS_CCP.md; do
-  curl --fail --location --output "$file" "https://raw.githubusercontent.com/RiskyBiscuit-arc/openpilot/eps-crv-a220-dump/eps_tools/$file" || break
-done
+curl -fL -o ccp_honda_eps.py https://raw.githubusercontent.com/RiskyBiscuit-arc/openpilot/eps-crv-a220-dump/eps_tools/ccp_honda_eps.py
 ```
 
-Confirm all four downloads succeeded before continuing. Use the comma's normal
+Confirm the download succeeded before continuing. Use the comma's normal
 Python environment; these tools require only its existing Panda package and the
 Python standard library. Keep the car parked, ignition ON, engine OFF, wheels
 straight. Nobody should need steering assistance during this procedure.
@@ -60,8 +59,7 @@ The process count must be zero. Then:
 
 ```bash
 cd /data/openpilot
-python3 /data/eps-a220-tools/ccp_honda_eps.py --probe --cro 0x727 --bus 1
-python3 /data/eps-a220-tools/dump_crv_a220.py --out-dir /data/eps-a220-capture --bus 1
+/usr/local/venv/bin/python /data/eps-a220-tools/ccp_honda_eps.py --probe --cro 0x727 --bus 1
 ```
 
 Run the capture only if the probe shows successful data reads, not merely CONNECT.
@@ -70,6 +68,24 @@ not establish that A220 cannot be read. If there is no response or the reads fai
 send the probe output for review; do not flash anything to enable dumping.
 If needed, `--sniff --cro 0x727` provides the existing transport diagnostic.
 The capture can take several minutes per pass. Keep battery voltage stable.
+
+After successful probe reads, make two fresh captures with the same routing:
+
+```bash
+mkdir /data/eps-a220-capture
+/usr/local/venv/bin/python /data/eps-a220-tools/ccp_honda_eps.py --dump /data/eps-a220-capture/read-1-DO_NOT_FLASH.bin --cro 0x727 --bus 1 --len 0x80000
+/usr/local/venv/bin/python /data/eps-a220-tools/ccp_honda_eps.py --dump /data/eps-a220-capture/read-2-DO_NOT_FLASH.bin --cro 0x727 --bus 1 --len 0x80000
+wc -c /data/eps-a220-capture/*.bin
+sha256sum /data/eps-a220-capture/*.bin
+```
+
+Each completed capture must be 524288 bytes. Matching full hashes establish
+repeatability only. Preserve both files, including incomplete or differing ones.
+These single-file commands do not generate the optional wrapper's JSON report
+or check application checksums; send the raw captures for offline review.
+
+`dump_crv_a220.py` remains optional for automated two-pass capture and reporting.
+It needs only itself and the standalone dumper, not `eps_profiles.py`.
 
 On completion, or after interrupting the tool, restore normal operation:
 
@@ -84,7 +100,7 @@ Confirm normal vehicle/openpilot operation before moving the car.
 Send the complete `/data/eps-a220-capture` folder and the probe output, along
 with the exact EPS software/part identification and whether its firmware is stock.
 The report labels A220 as operator-supplied identity, not an authenticated ECU read.
-No VIN is needed. A nonzero comparison/checksum result means retain and send the
+No VIN is needed. When using the optional wrapper, a nonzero comparison/checksum result means retain and send the
 unchanged evidence for review. Existing capture directories/files are refused;
 after an interrupted run use a new output directory. Partial files are retained.
 
