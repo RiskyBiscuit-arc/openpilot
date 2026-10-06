@@ -172,7 +172,13 @@ from openpilot.starpilot.common.testing_grounds import (
   TESTING_GROUNDS_SLOT_DEFINITIONS as SHARED_TESTING_GROUNDS_SLOT_DEFINITIONS,
   TESTING_GROUNDS_STATE_PATH as SHARED_TESTING_GROUNDS_STATE_PATH,
 )
-from openpilot.starpilot.navigation.destination_store import normalize_destination_payload, routing_configured, update_recent_destinations
+from openpilot.starpilot.navigation.destination_store import (
+  load_route_preferences,
+  normalize_destination_payload,
+  routing_configured,
+  save_route_preferences,
+  update_recent_destinations,
+)
 from openpilot.starpilot.navigation.offline_maps import (
   AREA_MAX_RADIUS_KM,
   AREA_MIN_RADIUS_KM,
@@ -6154,7 +6160,20 @@ def setup(app):
       "mapboxPublic": params.get("MapboxPublicKey", encoding="utf8") or "",
       "mapboxSecret": params.get("MapboxSecretKey", encoding="utf8") or "",
       "previousDestinations": params.get("ApiCache_NavDestinations", encoding="utf8") or "",
+      "routePreferences": load_route_preferences(params),
     }
+
+  @app.route("/api/navigation/preferences", methods=["GET", "POST"])
+  def navigation_preferences():
+    if request.method == "POST":
+      body = request.json or {}
+      prefs = load_route_preferences(params)
+      for k in ("avoid_tolls", "avoid_highways", "avoid_ferries", "prefer_eco"):
+        if k in body:
+          prefs[k] = bool(body[k])
+      save_route_preferences(prefs, params)
+      return {"message": "Route preferences saved", "routePreferences": prefs}
+    return {"routePreferences": load_route_preferences(params)}
 
   @app.route("/api/navigation", methods=["POST"])
   def set_navigation():
@@ -6166,6 +6185,18 @@ def setup(app):
     destination = normalize_destination_payload(request.json)
     if destination is None:
       return {"message": "Invalid destination payload"}, 400
+
+    # Persist any updated preferences passed with the destination
+    pref_keys = ("avoid_tolls", "avoid_highways", "avoid_ferries", "prefer_eco")
+    current_prefs = load_route_preferences(params)
+    prefs_in_req = {k: destination[k] for k in pref_keys if k in destination}
+    if prefs_in_req:
+      current_prefs.update(prefs_in_req)
+      save_route_preferences(current_prefs, params)
+
+    for k, v in current_prefs.items():
+      if k not in destination:
+        destination[k] = v
 
     recent_destinations = update_recent_destinations(
       params.get("ApiCache_NavDestinations", encoding="utf8") or "",

@@ -242,6 +242,12 @@ const state = reactive({
   previousDestinations: "[]",
   searchProvider: "mapbox",
   selectedRoute: null,
+  routePreferences: {
+    avoid_tolls: false,
+    avoid_highways: false,
+    avoid_ferries: false,
+    prefer_eco: false
+  },
   showRemoveFavoriteModal: false,
   showRenameFavoriteModal: false,
   suggestions: "[]"
@@ -295,6 +301,47 @@ export function NavDestination() {
     await setSpecial(favorite, "work", state, loadFavoritesAlphabetically);
   }
 
+function rankEcoRoutes(routes) {
+  if (!routes || routes.length <= 1) return routes;
+  const scored = routes.map((r, i) => {
+    const dist = Number(r.distance) || 0;
+    const dur = Math.max(1, Number(r.duration) || 1);
+    const avgSpeed = dist / dur;
+    const aeroExcess = Math.max(0, avgSpeed - 15.0);
+    const aeroFactor = 1.0 + (aeroExcess / 25.0) ** 2 * 0.5;
+    const cost = dist * aeroFactor;
+    return { route: r, cost, origIndex: i };
+  });
+  const minCost = Math.min(...scored.map(s => s.cost));
+  const maxCost = Math.max(...scored.map(s => s.cost));
+  scored.sort((a, b) => a.cost - b.cost);
+  return scored.map((s, idx) => {
+    const savingsPct = s.cost > minCost ? 0 : Math.max(0, ((maxCost - s.cost) / (maxCost || 1)) * 100);
+    return {
+      ...s.route,
+      isEco: idx === 0,
+      ecoSavingsPct: Math.round(savingsPct),
+    };
+  });
+}
+
+  async function toggleRoutePreference(key) {
+    state.routePreferences[key] = !state.routePreferences[key];
+    fetch("/api/navigation/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state.routePreferences)
+    }).catch(() => {});
+    if (state.selectedRoute?.destinationCoordinates) {
+      initiateNavigation({
+        name: state.selectedRoute.name,
+        longitude: state.selectedRoute.destinationCoordinates[0],
+        latitude: state.selectedRoute.destinationCoordinates[1],
+        routeId: state.selectedRoute.routeId
+      });
+    }
+  }
+
   async function initiateNavigation(destination, { resume = false } = {}) {
     state.selectedRoute = null;
     state.confirmedRoute = null;
@@ -314,11 +361,22 @@ export function NavDestination() {
       if (destinationMarker) destinationMarker.remove();
       destinationMarker = new mapboxgl.Marker().setLngLat(coords).addTo(map);
 
-      const routes = await getRoutes(
+      const excludes = [];
+      if (state.routePreferences.avoid_tolls) excludes.push("toll");
+      if (state.routePreferences.avoid_highways) excludes.push("motorway");
+      if (state.routePreferences.avoid_ferries) excludes.push("ferry");
+      const options = excludes.length ? { exclude: excludes.join(",") } : {};
+
+      let routes = await getRoutes(
         `${state.lastPosition.longitude},${state.lastPosition.latitude}`,
         `${coords[0]},${coords[1]}`,
-        state.mapboxPublic
+        state.mapboxPublic,
+        options
       );
+
+      if (routes && routes.length > 0 && state.routePreferences.prefer_eco) {
+        routes = rankEcoRoutes(routes);
+      }
 
       removeRouteFromMap(map);
 
@@ -392,6 +450,14 @@ export function NavDestination() {
     state.amap2Key = data.amap2Key?.trim() || "";
     state.isMetric = data.isMetric ?? true;
     state.language = data.language?.trim() || "";
+    if (data.routePreferences) {
+      state.routePreferences = {
+        avoid_tolls: !!data.routePreferences.avoid_tolls,
+        avoid_highways: !!data.routePreferences.avoid_highways,
+        avoid_ferries: !!data.routePreferences.avoid_ferries,
+        prefer_eco: !!data.routePreferences.prefer_eco
+      };
+    }
     const hasMapbox = !!state.mapboxPublic && !!state.mapboxSecret;
     const hasAMap = !!state.amap1Key && !!state.amap2Key;
     state.missingKeys = !hasMapbox;
@@ -949,6 +1015,10 @@ function NavigationDestination({
           longitude: destinationCoordinates[0],
           latitude: destinationCoordinates[1],
           routeId,
+          avoid_tolls: Boolean(state.routePreferences?.avoid_tolls),
+          avoid_highways: Boolean(state.routePreferences?.avoid_highways),
+          avoid_ferries: Boolean(state.routePreferences?.avoid_ferries),
+          prefer_eco: Boolean(state.routePreferences?.prefer_eco),
         })
       });
       result = await response.json().catch(() => ({}));
@@ -1040,6 +1110,20 @@ function NavigationDestination({
         <span class="emoji">🕗</span>
         <span class="label">ETA:</span>
         <span class="value">${etaString}</span>
+      </div>
+      <div class="navigation-preferences">
+        <button type="button" class="navigation-pref-pill ${() => state.routePreferences.avoid_tolls ? 'active' : ''}" @click="${() => toggleRoutePreference('avoid_tolls')}">
+          <i class="bi bi-slash-circle"></i> Avoid Tolls
+        </button>
+        <button type="button" class="navigation-pref-pill ${() => state.routePreferences.avoid_highways ? 'active' : ''}" @click="${() => toggleRoutePreference('avoid_highways')}">
+          <i class="bi bi-sign-stop"></i> Avoid Highways
+        </button>
+        <button type="button" class="navigation-pref-pill ${() => state.routePreferences.avoid_ferries ? 'active' : ''}" @click="${() => toggleRoutePreference('avoid_ferries')}">
+          <i class="bi bi-water"></i> Avoid Ferries
+        </button>
+        <button type="button" class="navigation-pref-pill ${() => state.routePreferences.prefer_eco ? 'active' : ''}" @click="${() => toggleRoutePreference('prefer_eco')}">
+          <i class="bi bi-tree"></i> 🌿 Fuel-Efficient
+        </button>
       </div>
       <div class="buttonCluster">
         ${() =>

@@ -184,8 +184,11 @@ export async function getCoordinatesFromSearch(searchValue, mapboxPublic, search
   return data.features?.[0]?.geometry?.coordinates;
 }
 
-export async function getRoutes(from, to, mapboxPublic) {
-  const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from};${to}?geometries=geojson&annotations=congestion&overview=full&alternatives=true&access_token=${mapboxPublic}`;
+export async function getRoutes(from, to, mapboxPublic, options = {}) {
+  let url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from};${to}?geometries=geojson&annotations=congestion&overview=full&alternatives=true&access_token=${mapboxPublic}`;
+  if (options?.exclude) {
+    url += `&exclude=${encodeURIComponent(options.exclude)}`;
+  }
   const response = await fetch(url);
   const data = await response.json();
   return data.routes;

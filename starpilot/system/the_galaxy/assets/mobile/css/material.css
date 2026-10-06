@@ -1661,6 +1661,41 @@ button.gx-chip:hover {
 
 .gx-navigation-route-option.selected { color: var(--primary); }
 
+.gx-navigation-preferences {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.gx-navigation-pref-pill {
+  align-items: center;
+  background: var(--surface-container);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-full);
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  transition: all 0.15s ease-in-out;
+}
+
+.gx-navigation-pref-pill:hover,
+.gx-navigation-pref-pill:focus-visible {
+  border-color: var(--primary);
+}
+
+.gx-navigation-pref-pill.active {
+  background: var(--primary-container);
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
 .gx-navigation-summary__actions {
   display: flex;
   gap: var(--sp-2);
