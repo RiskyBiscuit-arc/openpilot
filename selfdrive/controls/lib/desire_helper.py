@@ -1,4 +1,5 @@
 import json
+import math
 
 import numpy as np
 
@@ -6,6 +7,7 @@ from cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
+from openpilot.starpilot.common.vision_bsm import get_fresh_vasm_state
 
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
@@ -13,12 +15,19 @@ LaneChangeDirection = log.LaneChangeDirection
 LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
 LANE_CHANGE_NUDGE_TORQUE_THRESHOLD = 1200
+NAV_EXIT_COMMIT_DISTANCE = 500.0
 NAV_TURN_DISTANCE_SPEED_BREAKPOINTS = [0.0, 5.0, 10.0]
 NAV_TURN_DISTANCE_BREAKPOINTS = [20.0, 25.0, 30.0]
 NAV_KEEP_DISTANCE_SPEED_BREAKPOINTS = [0.0, 15.0, 30.0]
 NAV_KEEP_DISTANCE_BREAKPOINTS = [25.0, 90.0, 160.0]
 NAV_KEEP_AMBIGUOUS_SPLIT_DISTANCE_SCALE = 0.6
 NAV_KEEP_SMALL_SPLIT_MAX_OTHER_LANES = 2
+
+TURN_DESIRE_PULSE_CYCLE_FRAMES = round(5.0 / DT_MDL)
+TURN_DESIRE_PULSE_HOLD_FRAMES = TURN_DESIRE_PULSE_CYCLE_FRAMES - 1
+TURN_RECOIL_HEADING_RAD = math.radians(55.0)
+TURN_DESIRE_MAX_SECONDS = 25.0
+TURN_DESIRE_MOVING_SPEED = 0.5
 
 DESIRES = {
   LaneChangeDirection.none: {
@@ -67,6 +76,12 @@ class DesireHelper:
     self.lane_change_wait_timer = 0.0
     self.nav_desires_allowed = False
     self.nav_lane_positioning_allowed = False
+    self.nav_exit_lane_change = False
+    self.turn_desire_frames = 0
+    self.turn_desire_cycle_input = log.Desire.none
+    self.turn_heading_rad = 0.0
+    self.turn_desire_seconds = 0.0
+    self.turn_recoiled = False
     self._nav_instruction_state_raw: object = None
     self._nav_instruction_state: dict[str, object] = {}
 
@@ -94,12 +109,26 @@ class DesireHelper:
 
     self._nav_instruction_state = {}
 
+  def _get_combined_blindspot(self, carstate, lane_change_direction, v_asm_enabled=False):
+    vasm_left, vasm_right = (False, False)
+    if v_asm_enabled:
+      vasm_left, vasm_right = get_fresh_vasm_state(self.params_memory)
+    if lane_change_direction == LaneChangeDirection.left:
+      return bool(getattr(carstate, "leftBlindspot", False) or vasm_left)
+    elif lane_change_direction == LaneChangeDirection.right:
+      return bool(getattr(carstate, "rightBlindspot", False) or vasm_right)
+    return False
+
   @staticmethod
-  def _nav_keep_direction_is_clear(carstate, lane_change_direction):
-    return not (
-      (lane_change_direction == LaneChangeDirection.left and carstate.leftBlindspot) or
-      (lane_change_direction == LaneChangeDirection.right and carstate.rightBlindspot)
-    )
+  def _nav_keep_direction_is_clear(carstate, lane_change_direction, params_memory=None, v_asm_enabled=False):
+    vasm_left, vasm_right = (False, False)
+    if v_asm_enabled and params_memory is not None:
+      vasm_left, vasm_right = get_fresh_vasm_state(params_memory)
+    if lane_change_direction == LaneChangeDirection.left:
+      return not (getattr(carstate, "leftBlindspot", False) or vasm_left)
+    if lane_change_direction == LaneChangeDirection.right:
+      return not (getattr(carstate, "rightBlindspot", False) or vasm_right)
+    return True
 
   @staticmethod
   def _nav_torque_applied(carstate, lane_change_direction):
@@ -207,12 +236,13 @@ class DesireHelper:
     if modifier == "":
       return log.Desire.none
 
+    v_asm_enabled = bool(getattr(starpilot_toggles, "v_asm_enabled", False))
     if modifier == "slightLeft":
       if not self.nav_lane_positioning_allowed:
         return log.Desire.none
       lane_change_direction = LaneChangeDirection.left
       desired_lane_width = starpilotPlan.laneWidthLeft
-      if not carstate.rightBlinker and self._nav_keep_direction_is_clear(carstate, lane_change_direction):
+      if not carstate.rightBlinker and self._nav_keep_direction_is_clear(carstate, lane_change_direction, self.params_memory, v_asm_enabled):
         if desired_lane_width >= starpilot_toggles.lane_detection_width and self._nav_torque_applied(carstate, lane_change_direction):
           return log.Desire.keepLeft
     elif modifier == "slightRight":
@@ -220,21 +250,90 @@ class DesireHelper:
         return log.Desire.none
       lane_change_direction = LaneChangeDirection.right
       desired_lane_width = starpilotPlan.laneWidthRight
-      if not carstate.leftBlinker and self._nav_keep_direction_is_clear(carstate, lane_change_direction):
+      if not carstate.leftBlinker and self._nav_keep_direction_is_clear(carstate, lane_change_direction, self.params_memory, v_asm_enabled):
         if desired_lane_width >= starpilot_toggles.lane_detection_width and self._nav_torque_applied(carstate, lane_change_direction):
           return log.Desire.keepRight
     elif modifier in ("left", "sharpLeft"):
-      turn_allowed = carstate.leftBlinker and not carstate.rightBlinker and not carstate.leftBlindspot
+      left_blocked = self._get_combined_blindspot(carstate, LaneChangeDirection.left, v_asm_enabled)
+      turn_allowed = carstate.leftBlinker and not carstate.rightBlinker and not left_blocked
       turn_allowed &= carstate.vEgo < starpilot_toggles.minimum_lane_change_speed and not carstate.standstill
       if turn_allowed and self._nav_turn_is_imminent(carstate, maneuver_distance):
         return log.Desire.turnLeft
     elif modifier in ("right", "sharpRight"):
-      turn_allowed = carstate.rightBlinker and not carstate.leftBlinker and not carstate.rightBlindspot
+      right_blocked = self._get_combined_blindspot(carstate, LaneChangeDirection.right, v_asm_enabled)
+      turn_allowed = carstate.rightBlinker and not carstate.leftBlinker and not right_blocked
       turn_allowed &= carstate.vEgo < starpilot_toggles.minimum_lane_change_speed and not carstate.standstill
       if turn_allowed and self._nav_turn_is_imminent(carstate, maneuver_distance):
         return log.Desire.turnRight
 
     return log.Desire.none
+
+  def _get_nav_exit_lane_change_direction(self, starpilot_toggles):
+    self._update_nav_params()
+    nav_exit_allowed = getattr(starpilot_toggles, "nav_exit_lane_change", False) or \
+                       getattr(starpilot_toggles, "nav_desires_allowed", self.nav_desires_allowed)
+    if not bool(nav_exit_allowed):
+      return LaneChangeDirection.none
+
+    if not bool(self._nav_instruction_state.get("valid", False)):
+      return LaneChangeDirection.none
+
+    maneuver_type = str(self._nav_instruction_state.get("maneuverType", "")).lower()
+    modifier = str(self._nav_instruction_state.get("maneuverModifier", ""))
+    active_lane_dir = str(self._nav_instruction_state.get("activeLaneDirection", ""))
+    try:
+      distance = float(self._nav_instruction_state.get("maneuverDistance", 9999.0))
+    except (TypeError, ValueError):
+      return LaneChangeDirection.none
+
+    is_exit_maneuver = (maneuver_type in ("off ramp", "fork", "exit") or "exit" in modifier.lower() or
+                        bool(self._nav_instruction_state.get("shouldSendLaneChangeDesire", False)))
+    if is_exit_maneuver and 0.0 < distance <= NAV_EXIT_COMMIT_DISTANCE:
+      if modifier in ("left", "sharpLeft", "slightLeft") or active_lane_dir in ("left", "slightLeft"):
+        return LaneChangeDirection.left
+      elif modifier in ("right", "sharpRight", "slightRight") or active_lane_dir in ("right", "slightRight"):
+        return LaneChangeDirection.right
+
+    return LaneChangeDirection.none
+
+  def _measured_yaw_rate(self, carstate) -> float:
+    try:
+      return float(getattr(carstate, "yawRate", 0.0) or 0.0)
+    except (TypeError, ValueError):
+      return 0.0
+
+  def _turn_recoiled(self, desired_output: log.Desire, carstate) -> bool:
+    if desired_output != self.turn_desire_cycle_input:
+      self.turn_heading_rad = 0.0
+      self.turn_desire_seconds = 0.0
+      self.turn_recoiled = False
+    self.turn_heading_rad += abs(self._measured_yaw_rate(carstate)) * DT_MDL
+    if float(getattr(carstate, "vEgo", 0.0) or 0.0) > TURN_DESIRE_MOVING_SPEED:
+      self.turn_desire_seconds += DT_MDL
+    if self.turn_heading_rad >= TURN_RECOIL_HEADING_RAD or self.turn_desire_seconds >= TURN_DESIRE_MAX_SECONDS:
+      self.turn_recoiled = True
+    return self.turn_recoiled
+
+  def _pulse_turn_desire(self, desired_output: log.Desire, carstate) -> log.Desire:
+    if desired_output not in (log.Desire.turnLeft, log.Desire.turnRight):
+      self.turn_desire_frames = 0
+      self.turn_desire_cycle_input = log.Desire.none
+      self.turn_heading_rad = 0.0
+      self.turn_desire_seconds = 0.0
+      self.turn_recoiled = False
+      return desired_output
+
+    recoiled = self._turn_recoiled(desired_output, carstate)
+
+    if desired_output != self.turn_desire_cycle_input:
+      self.turn_desire_frames = 0
+      self.turn_desire_cycle_input = desired_output
+
+    cycle_frame = self.turn_desire_frames % TURN_DESIRE_PULSE_CYCLE_FRAMES
+    self.turn_desire_frames += 1
+    if recoiled or cycle_frame >= TURN_DESIRE_PULSE_HOLD_FRAMES:
+      return log.Desire.none
+    return desired_output
 
   @staticmethod
   def get_lane_change_direction(CS):
@@ -252,21 +351,39 @@ class DesireHelper:
     lane_changes_allowed &= not getattr(starpilot_toggles, "lane_changes_require_cruise", False) or bool(getattr(cruise_state, "enabled", False))
 
     lane_change_time_max = getattr(starpilot_toggles, 'lane_change_time_max', LANE_CHANGE_TIME_MAX)
+    nav_exit_direction = self._get_nav_exit_lane_change_direction(starpilot_toggles)
+    nav_exit_enabled = getattr(starpilot_toggles, "nav_exit_lane_change", False)
+
     if not lateral_active or self.lane_change_timer > lane_change_time_max or not lane_changes_allowed:
       self.lane_change_state = LaneChangeState.off
       self.lane_change_direction = LaneChangeDirection.none
+      self.nav_exit_lane_change = False
     else:
       # LaneChangeState.off
-      if self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
-        self.lane_change_state = LaneChangeState.preLaneChange
-        self.lane_change_ll_prob = 1.0
-        # Initialize lane change direction to prevent UI alert flicker
-        self.lane_change_direction = self.get_lane_change_direction(carstate)
+      if self.lane_change_state == LaneChangeState.off:
+        if one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
+          self.lane_change_state = LaneChangeState.preLaneChange
+          self.lane_change_ll_prob = 1.0
+          self.nav_exit_lane_change = False
+          # Initialize lane change direction to prevent UI alert flicker
+          self.lane_change_direction = self.get_lane_change_direction(carstate)
+        elif not one_blinker and nav_exit_enabled and nav_exit_direction != LaneChangeDirection.none and not below_lane_change_speed and not self.lane_change_completed:
+          # Navigation requested exit lane change -> enter preLaneChange
+          self.lane_change_state = LaneChangeState.preLaneChange
+          self.lane_change_ll_prob = 1.0
+          self.nav_exit_lane_change = True
+          self.lane_change_direction = nav_exit_direction
 
       # LaneChangeState.preLaneChange
       elif self.lane_change_state == LaneChangeState.preLaneChange:
-        # Update lane change direction
-        self.lane_change_direction = self.get_lane_change_direction(carstate)
+        if one_blinker:
+          self.nav_exit_lane_change = False
+          self.lane_change_direction = self.get_lane_change_direction(carstate)
+        elif self.nav_exit_lane_change:
+          if nav_exit_direction == LaneChangeDirection.none or below_lane_change_speed:
+            self.lane_change_state = LaneChangeState.off
+            self.lane_change_direction = LaneChangeDirection.none
+            self.nav_exit_lane_change = False
 
         # Keep lane-change nudge sensitivity aligned with the old raw torque threshold,
         # even if steeringPressed is raised elsewhere for driver override filtering.
@@ -275,26 +392,30 @@ class DesireHelper:
                          ((carstate.steeringTorque > 0 and self.lane_change_direction == LaneChangeDirection.left) or
                           (carstate.steeringTorque < 0 and self.lane_change_direction == LaneChangeDirection.right))
 
-        blindspot_detected = ((carstate.leftBlindspot and self.lane_change_direction == LaneChangeDirection.left) or
-                              (carstate.rightBlindspot and self.lane_change_direction == LaneChangeDirection.right))
+        v_asm_enabled = bool(getattr(starpilot_toggles, "v_asm_enabled", False))
+        blindspot_detected = self._get_combined_blindspot(carstate, self.lane_change_direction, v_asm_enabled=v_asm_enabled)
 
-        if torque_applied:
-          self.lane_change_wait_timer = starpilot_toggles.lane_change_delay
+        if self.nav_exit_lane_change:
+          # Vision ASM is used: driver confirmation via steering nudge is strictly required before launching!
+          launch_allowed = torque_applied and not blindspot_detected
         else:
-          torque_applied |= nudgeless_enabled
-          torque_applied &= self.lane_change_wait_timer >= starpilot_toggles.lane_change_delay
+          if torque_applied:
+            self.lane_change_wait_timer = starpilot_toggles.lane_change_delay
+          else:
+            torque_applied |= nudgeless_enabled
+            torque_applied &= self.lane_change_wait_timer >= starpilot_toggles.lane_change_delay
 
-          desired_lane_width = starpilotPlan.laneWidthLeft if self.lane_change_direction == LaneChangeDirection.left else starpilotPlan.laneWidthRight
-          torque_applied &= desired_lane_width >= starpilot_toggles.lane_detection_width
+            desired_lane_width = starpilotPlan.laneWidthLeft if self.lane_change_direction == LaneChangeDirection.left else starpilotPlan.laneWidthRight
+            torque_applied &= desired_lane_width >= starpilot_toggles.lane_detection_width
+          launch_allowed = torque_applied and not blindspot_detected
 
-        if not one_blinker or below_lane_change_speed or self.lane_change_completed:
+        if (not one_blinker and not self.nav_exit_lane_change) or below_lane_change_speed or self.lane_change_completed:
           self.lane_change_state = LaneChangeState.off
           self.lane_change_direction = LaneChangeDirection.none
-        elif torque_applied and not blindspot_detected:
+          self.nav_exit_lane_change = False
+        elif launch_allowed:
           self.lane_change_state = LaneChangeState.laneChangeStarting
-
-          self.lane_change_completed = starpilot_toggles.one_lane_change
-
+          self.lane_change_completed = True if self.nav_exit_lane_change else starpilot_toggles.one_lane_change
           self.lane_change_wait_timer = 0.0
 
         self.lane_change_wait_timer += DT_MDL
@@ -319,6 +440,7 @@ class DesireHelper:
             self.lane_change_state = LaneChangeState.preLaneChange
           else:
             self.lane_change_state = LaneChangeState.off
+            self.nav_exit_lane_change = False
 
     if self.lane_change_state in (LaneChangeState.off, LaneChangeState.preLaneChange):
       self.lane_change_timer = 0.0
@@ -344,12 +466,14 @@ class DesireHelper:
       elif self.desire in (log.Desire.keepLeft, log.Desire.keepRight):
         self.desire = log.Desire.none
 
-    if not one_blinker:
+    if not one_blinker and not self.nav_exit_lane_change:
       self.lane_change_completed = False
-
       self.lane_change_wait_timer = 0.0
 
     nav_desire = self._navigation_desire(carstate, lateral_active, starpilotPlan, starpilot_toggles)
     self.nav_desire = nav_desire
     if nav_desire != log.Desire.none and self.lane_change_state == LaneChangeState.off:
       self.desire = nav_desire
+
+    if self.desire in (log.Desire.turnLeft, log.Desire.turnRight):
+      self.desire = self._pulse_turn_desire(self.desire, carstate)
