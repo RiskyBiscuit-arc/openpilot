@@ -642,12 +642,6 @@ def bosch_a_birth_rail_ramp_low_enabled() -> bool:
   except Exception:
     return False
 
-def bosch_a_range_kf_enabled() -> bool:
-  try:
-    return bool(Params().get_bool("BoschARangeKF"))
-  except Exception:
-    return False
-
 def is_bosch_a_radar_car(CP) -> bool:
   return CP.brand == "honda" and CP.carFingerprint in HONDA_BOSCH_A and not CP.radarUnavailable
 
