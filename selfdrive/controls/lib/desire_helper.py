@@ -271,7 +271,8 @@ class DesireHelper:
   def _get_nav_exit_lane_change_direction(self, starpilot_toggles):
     self._update_nav_params()
     nav_exit_allowed = getattr(starpilot_toggles, "nav_exit_lane_change", False) or \
-                       getattr(starpilot_toggles, "nav_desires_allowed", self.nav_desires_allowed)
+                       (getattr(starpilot_toggles, "nav_desires_allowed", self.nav_desires_allowed) and \
+                        getattr(starpilot_toggles, "nav_lane_positioning_allowed", self.nav_lane_positioning_allowed))
     if not bool(nav_exit_allowed):
       return LaneChangeDirection.none
 
@@ -281,13 +282,17 @@ class DesireHelper:
     maneuver_type = str(self._nav_instruction_state.get("maneuverType", "")).lower()
     modifier = str(self._nav_instruction_state.get("maneuverModifier", ""))
     active_lane_dir = str(self._nav_instruction_state.get("activeLaneDirection", ""))
+    should_send_lc = bool(self._nav_instruction_state.get("shouldSendLaneChangeDesire", False))
+    # If the vehicle already has active lane guidance for this ramp/fork, it uses in-lane keep positioning (keepLeft/keepRight).
+    if active_lane_dir in ("slightLeft", "left", "slightRight", "right") and not should_send_lc:
+      return LaneChangeDirection.none
+
     try:
       distance = float(self._nav_instruction_state.get("maneuverDistance", 9999.0))
     except (TypeError, ValueError):
       return LaneChangeDirection.none
 
-    is_exit_maneuver = (maneuver_type in ("off ramp", "fork", "exit") or "exit" in modifier.lower() or
-                        bool(self._nav_instruction_state.get("shouldSendLaneChangeDesire", False)))
+    is_exit_maneuver = (maneuver_type in ("off ramp", "fork", "exit") or "exit" in modifier.lower() or should_send_lc)
     if is_exit_maneuver and 0.0 < distance <= NAV_EXIT_COMMIT_DISTANCE:
       if modifier in ("left", "sharpLeft", "slightLeft") or active_lane_dir in ("left", "slightLeft"):
         return LaneChangeDirection.left
@@ -352,7 +357,9 @@ class DesireHelper:
 
     lane_change_time_max = getattr(starpilot_toggles, 'lane_change_time_max', LANE_CHANGE_TIME_MAX)
     nav_exit_direction = self._get_nav_exit_lane_change_direction(starpilot_toggles)
-    nav_exit_enabled = getattr(starpilot_toggles, "nav_exit_lane_change", False)
+    nav_exit_enabled = getattr(starpilot_toggles, "nav_exit_lane_change", False) or \
+                       (getattr(starpilot_toggles, "nav_desires_allowed", self.nav_desires_allowed) and \
+                        getattr(starpilot_toggles, "nav_lane_positioning_allowed", self.nav_lane_positioning_allowed))
 
     if not lateral_active or self.lane_change_timer > lane_change_time_max or not lane_changes_allowed:
       self.lane_change_state = LaneChangeState.off
