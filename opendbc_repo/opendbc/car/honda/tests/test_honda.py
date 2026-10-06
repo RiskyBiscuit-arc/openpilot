@@ -2,18 +2,21 @@ import re
 from types import SimpleNamespace
 import pytest
 
-from opendbc.car import structs
+from opendbc.car import Bus, structs
 from opendbc.car.structs import CarParams
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.carcontroller import (
+  BOSCH_BRAKE_FORCE_ON,
+  BOSCH_BRAKE_FORCE_RELEASE,
   CarController,
   get_eps_modified_steering_pressed,
   get_honda_bosch_wind_brake_mps2,
+  update_honda_bosch_braking,
   update_honda_bosch_live_learning,
 )
-from opendbc.car.honda.hondacan import create_brake_command, create_lkas_hud
+from opendbc.car.honda.hondacan import create_acc_commands, create_brake_command, create_lkas_hud
 from opendbc.car.honda.fingerprints import FW_VERSIONS
 from opendbc.car.honda.values import CAR, DBC, HONDA_BOSCH, HONDA_BOSCH_TJA_CONTROL, CarControllerParams, HondaFlags, HondaSafetyFlags, \
                                      HondaStarPilotFlags
@@ -26,6 +29,72 @@ def get_test_toggles() -> SimpleNamespace:
 
 
 class TestHondaFingerprint:
+  @staticmethod
+  def _acc_control_values(active, accel, gas=500, gas_force=0.5, braking=False):
+    class FakePacker:
+      @staticmethod
+      def make_can_msg(name, bus, values):
+        return name, bus, values
+
+    can = SimpleNamespace(pt=1)
+    commands = create_acc_commands(FakePacker(), can, True, active, accel, gas, 0, CAR.HONDA_CRV_5G, gas_force, braking)
+    assert commands[-1][0] == "ACC_CONTROL"
+    return commands[-1][2]
+
+  def test_bosch_acc_commands_reject_fault_route_gas_brake_conflict(self):
+    # Route 00000002--aa8501ddcb broadcast P061B while Alpha Long sent
+    # approximately accel=-0.27, positive gas, and both brake bits. Drag/grade
+    # compensation calculated positive gas. Same-domain arbitration selects
+    # propulsion rather than reproducing the observed simultaneous request.
+    braking = update_honda_bosch_braking(False, 0.2, False, True)
+    values = self._acc_control_values(True, -0.27, gas=160, gas_force=0.2, braking=braking)
+
+    assert values["GAS_COMMAND"] == 160
+    assert values["ACCEL_COMMAND"] == pytest.approx(-0.27)
+    assert values["BRAKE_REQUEST"] == 0
+    assert values["BRAKE_LIGHTS"] == 0
+
+  @pytest.mark.parametrize("active", [False, True])
+  @pytest.mark.parametrize("accel", [-3.5, -0.27, -0.2, -0.1, 0.0, 0.01, 2.0])
+  @pytest.mark.parametrize("gas_force", [-0.5, 0.0, 0.5])
+  @pytest.mark.parametrize("braking", [False, True])
+  def test_bosch_acc_commands_never_request_gas_and_braking_together(self, active, accel, gas_force, braking):
+    values = self._acc_control_values(active, accel, gas_force=gas_force, braking=braking)
+
+    assert not (values["GAS_COMMAND"] > 0 and values["BRAKE_REQUEST"] == 1)
+    assert not (values["GAS_COMMAND"] > 0 and values["BRAKE_LIGHTS"] == 1)
+    if values["GAS_COMMAND"] > 0:
+      assert active
+
+  def test_bosch_acc_commands_preserve_road_load_gas_above_brake_threshold(self):
+    # Route 00000003--1423cb6de2 showed severe cycling when the prior fix cut
+    # this positive drag/grade-compensated gas at raw accel zero.
+    values = self._acc_control_values(True, -0.1, gas=500, gas_force=0.3)
+
+    assert values["GAS_COMMAND"] == 500
+    assert values["ACCEL_COMMAND"] == pytest.approx(-0.1)
+    assert values["BRAKE_REQUEST"] == 0
+    assert values["BRAKE_LIGHTS"] == 0
+
+  def test_bosch_acc_commands_do_not_send_gas_without_positive_force(self):
+    values = self._acc_control_values(True, 0.2, gas=500, gas_force=-0.4)
+
+    assert values["GAS_COMMAND"] == -30000
+
+  def test_bosch_braking_uses_force_hysteresis(self):
+    braking = update_honda_bosch_braking(False, BOSCH_BRAKE_FORCE_ON - 0.01, False, True)
+    assert braking
+
+    braking = update_honda_bosch_braking(braking, -0.05, False, True)
+    assert braking
+
+    braking = update_honda_bosch_braking(braking, BOSCH_BRAKE_FORCE_RELEASE + 0.01, False, True)
+    assert not braking
+
+  def test_bosch_braking_preserves_stopping_and_resets_inactive(self):
+    assert update_honda_bosch_braking(False, 0.5, True, True)
+    assert not update_honda_bosch_braking(True, -1.0, False, False)
+
   def test_honda_lkas_hud_shows_lane_lines_when_lateral_only_is_active(self):
     class FakePacker:
       @staticmethod
@@ -117,9 +186,9 @@ class TestHondaFingerprint:
     assert b'39990-TLA,A040\x00\x00' in FW_VERSIONS[CAR.HONDA_CRV_5G][(CarParams.Ecu.eps, 0x18DA30F1, None)]
 
   def test_modified_eps_candidates_keep_support_and_apply_nrdr_linear_max_tunes(self):
-    # The NRDR linear-max RWD images (39990-TBA-C120 Civic, 39990-TLA-A040 CR-V 5G) ramp linearly to
-    # the 3840 firmware cap, so the piecewise stock breakpoints collapse to a single ramp and the
-    # gains drop to match. See eps_tools/rwd/.
+    # The NRDR linear-max RWD images ramp linearly to the firmware cap, so the piecewise stock
+    # breakpoints collapse to a single ramp and the gains drop to match. See eps_tools/rwd/.
+    # 39990-TBA-C120 (Civic) caps at 3840; 39990-TLA-A040 (CR-V 5G) caps at 4096 -- its own range.
     toggles = SimpleNamespace(force_torque_controller=False, nnff=False, nnff_lite=False)
 
     civic_fw = [CarParams.CarFw(ecu=CarParams.Ecu.eps, fwVersion=b'39990-TBA,A030\x00\x00', address=0x18DA30F1, subAddress=0)]
@@ -154,11 +223,14 @@ class TestHondaFingerprint:
     crv_cp = CarInterface.get_params(CAR.HONDA_CRV_5G, gen_empty_fingerprint(), crv_fw, False, False, False, toggles)
     assert not crv_cp.dashcamOnly
     assert crv_cp.flags & HondaFlags.EPS_MODIFIED
-    assert list(crv_cp.lateralParams.torqueBP) == [0, 3840]
-    assert list(crv_cp.lateralParams.torqueV) == [0, 3840]
-    assert list(crv_cp.lateralTuning.pid.kpV) == pytest.approx([0.06])
-    assert list(crv_cp.lateralTuning.pid.kiV) == pytest.approx([0.02])
-    assert crv_cp.lateralTuning.pid.kf == pytest.approx(0.000024)
+    assert list(crv_cp.lateralParams.torqueBP) == [0, 4096]
+    assert list(crv_cp.lateralParams.torqueV) == [0, 4096]
+    # shares the same four-point handoff-at-25mph tune as the modified Civic above
+    assert list(crv_cp.lateralTuning.pid.kpBP) == pytest.approx(civic_matched_bp)
+    assert list(crv_cp.lateralTuning.pid.kiBP) == pytest.approx(civic_matched_bp)
+    assert list(crv_cp.lateralTuning.pid.kpV) == pytest.approx([0.018, 0.024, 0.048, 0.060])
+    assert list(crv_cp.lateralTuning.pid.kiV) == pytest.approx([0.006, 0.008, 0.016, 0.020])
+    assert crv_cp.lateralTuning.pid.kf == pytest.approx(3.6e-6)
     assert crv_cp.steerAtStandstill
     assert crv_cp.minSteerSpeed == pytest.approx(-1.0)
 
@@ -257,6 +329,16 @@ class TestHondaFingerprint:
     assert CP.openpilotLongitudinalControl
     assert CP.safetyConfigs[-1].safetyParam & HondaSafetyFlags.BOSCH_CANFD
     assert CP.safetyConfigs[-1].safetyParam & HondaSafetyFlags.BOSCH_LONG
+
+  def test_mvl_handover_is_scoped_to_accord_11g(self):
+    toggles = get_test_toggles()
+    accord_cp = CarInterface.get_params(CAR.HONDA_ACCORD_11G, gen_empty_fingerprint(), [], True, False, False, toggles)
+    crv_cp = CarInterface.get_params(CAR.HONDA_CRV_6G, gen_empty_fingerprint(), [], True, False, False, toggles)
+
+    assert Bus.radar in DBC[accord_cp.carFingerprint]
+    assert Bus.radar not in DBC[crv_cp.carFingerprint]
+    assert accord_cp.safetyConfigs[-1].safetyParam & HondaSafetyFlags.BOSCH_CANFD_MVL
+    assert not crv_cp.safetyConfigs[-1].safetyParam & HondaSafetyFlags.BOSCH_CANFD_MVL
 
   def test_nidec_pedal_detection_enables_interceptor_path(self):
     toggles = get_test_toggles()

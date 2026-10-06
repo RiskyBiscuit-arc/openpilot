@@ -800,6 +800,8 @@ struct RadarState @0x9a185389d6fdd05f {
     modelProb @13 :Float32;
     radar @14 :Bool;
     radarTrackId @15 :Int32 = -1;
+    accelKalmanWeight @16 :Float32 = 1;
+    radarMeasurementAge @17 :Float32;
 
     aLeadDEPRECATED @5 :Float32;
   }
@@ -1333,6 +1335,10 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   leadTrajectoryV0 @41 :List(Float32);
   leadTrajectoryX1 @42 :List(Float32);
   leadTrajectoryV1 @43 :List(Float32);
+  # Value the post-MPC close-lead brake cap demanded this frame, 0.0 when it did not engage.
+  # aTarget is min(MPC, caps), so without this a saturation cannot be attributed to the cap
+  # or to the MPC -- both clip at ACCEL_MIN. Diagnostic only; nothing consumes it.
+  closeLeadBrakeCap @44 :Float32;
 
   enum LongitudinalPlanSource {
     cruise @0;
