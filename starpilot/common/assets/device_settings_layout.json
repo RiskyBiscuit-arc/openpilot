@@ -3122,18 +3122,6 @@
         "settings_tier": "advanced"
       },
       {
-        "key": "BoschARangeKF",
-        "label": "Range-Driven Lead Correction",
-        "description": "Range-KF correction is capped by camera closing agreement. Restart required.",
-        "picker_description": "Range-KF correction is capped by camera closing agreement.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "category": "longitudinal_tuning",
-        "parent_key": "AdvancedLongitudinalTune",
-        "requires_offroad": true,
-        "settings_tier": "advanced"
-      },
-      {
         "key": "BoschAOverBrakeComp",
         "label": "Mid-Band Over-Brake Comp",
         "description": "Mid-band over-brake compensation for Civic Bosch. Restart required.",
