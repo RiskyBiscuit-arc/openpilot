@@ -10672,6 +10672,31 @@ Tests: `selfdrive/controls/tests/test_brake_onset.py` 23 pass (static). Galaxy s
 - **Not verified.** The 1.0 m minimum gap is a simulated gap from replay. No drive has run this law. Road-check with a longer following distance first, then rerun `tools/longitudinal/vsa_felt_brake_report.py` on that drive.
 - **Tests.** `test_brake_onset.py` 21 pass after the onset code removal, including removal wiring, depth by TTC, rate, outside-law step limit, and newborn bound gate.
 
+## 227. CR-V 5G feedback scale and column load re-measured in the controller's units (2026-10-06). D-093.
+
+- `[CONFIRMED static firmware]` Calibrated image = the released Proper Torque Mod RWD
+  `39990-TLA-A040_Clarity_FF_tune_telemety_8cf8e537.rwd` (Drive, RWD SHA-256 `26f5390b…`), which decodes
+  byte-for-byte to full image `d5dc04a8…` (the same bytes as the `…_DO_NOT_FLASH_full.bin` build artifact):
+  normalization 1650, tracker-1 3200. Route `00000006--82bb552a2c` was recorded on the earlier test build
+  t9-67523237 (decoded from the retained `39990-TLA-A040-t9-67523237-DO_NOT_FLASH.rwd`: normalization 1450,
+  tracker-1 1999); it is used only for that drive's normalization, nothing from it ships.
+- `[CONFIRMED offline route]` Native extraction of that route (`drive-82bb552a2c-native-v5.json.zst`, SHA-256
+  `8b94a3439b6f7fdeeea0f1bb32a9c0a8037637441c01b15af41fde0cb9fdedd7`), `tools/lateral/fit_crv_eps_load.py`:
+  R6 = -121.6051 x steeringRateDeg at a 15 ms lag (R² 0.977, 15,966 samples) → -138.378 at norm 1650
+  (was -120.284, a lag-biased single ratio). Column load (40,193 samples, m/s, offset-corrected angle, roll):
+  `(-7.29446, -0.143159, -4.60337, -297.83, -19.899, -3.58048)`, R² 0.843, holdouts 0.857/0.820.
+- `[CONFIRMED]` The D-091 load was fitted on the compact drive, whose `speed` is mph (`extract_drives.py`
+  writes `vEgo * 2.23694`): k1 5.0x too weak in m/s, the angle offset in the bias, no roll. On this drive it
+  scores R² 0.65 in the controller's units; above 25 m/s 181 counts RMS vs 110 for the refit.
+- `[CONFIRMED by PR author]` `test_nrdr_eps_firmware_ff.py` and the new
+  `tools/lateral/tests/test_fit_crv_eps_load.py` were reported as 179 passing on macOS with a pure-Python Params
+  stub; reverting the load constant fails `test_crv_load_is_in_the_controllers_units`.
+- `[CONFIRMED during merge]` The four new synthetic-fit tests pass and recover R6, lag, and all six load terms;
+  Ruff, Python compilation, and `git diff --check` pass. The full controller test cannot collect in this checkout
+  because the tracked `transformations.so` is Linux/aarch64; it was not counted as a local pass.
+- Not done: no drive on the changed controller; nothing here validates the closed loop. The neutral P/I
+  multipliers (D-091) are unchanged.
+
 ## 226. NovaSpark local v16 model installed on the comma and retained in-repo (2026-10-06). D-092.
 
 - `[CONFIRMED static package/device]` The supplied artifact SHA-256 is
