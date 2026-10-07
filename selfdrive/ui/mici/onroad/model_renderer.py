@@ -90,6 +90,7 @@ class ModelPoints:
 LEAD_LABEL_FONT_SIZE = 26  # owner: 20, then 24, read too small on the road (2026-09-24)
 ADJACENT_LEFT_LEAD_COLOR = rl.Color(0, 150, 255, 255)
 ADJACENT_RIGHT_LEAD_COLOR = rl.Color(180, 0, 255, 255)
+ADJACENT_LANE_TINT_ALPHA = 90  # fill of the adjacent lane a side lead occupies
 ADJACENT_LEAD_MIN_ALPHA = 140
 # adjacent-lane markers draw smaller than the in-path ones, with a smaller speed label (owner: "slightly smaller,
 # with the speed label right below it")
@@ -164,6 +165,7 @@ class ModelRenderer(Widget):
     self._road_edge_stds = np.zeros(2, dtype=np.float32)
     self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
     self._adjacent_lead_vehicles = [LeadVehicle(), LeadVehicle()]
+    self._adjacent_lane_polygons = [np.empty((0, 2), dtype=np.float32), np.empty((0, 2), dtype=np.float32)]
     self._multi_lead_ui = False
     self._lead_label_rects: list[rl.Rectangle] = []
     self._side_label_obstacles: list[rl.Rectangle] = []
@@ -261,6 +263,7 @@ class ModelRenderer(Widget):
       self._update_adjacent_leads(starpilot_radar_state, path_x_array, radar_state if render_lead_indicator else None)
       self._transform_dirty = False
 
+    self._draw_adjacent_lane_tint()
     self._draw_lane_lines()
     if self._params.get_bool("RainbowPath", default=False) and sm.valid.get('carState', False):
       self._rainbow_path.update(max(sm['carState'].vEgo, 0.0))
@@ -351,6 +354,7 @@ class ModelRenderer(Widget):
     marker or label until its radar track has held the slot SIDE_LEAD_MIN_AGE_S (its radar dot still draws)."""
     in_path = (radar_state.leadOne, radar_state.leadTwo) if radar_state is not None else ()
     self._adjacent_lead_vehicles = [LeadVehicle(), LeadVehicle()]
+    self._adjacent_lane_polygons = [np.empty((0, 2), dtype=np.float32), np.empty((0, 2), dtype=np.float32)]
     ages = self.__dict__.setdefault("_side_lead_since", [None, None])
     if starpilot_radar_state is None:
       ages[:] = [None, None]
@@ -378,6 +382,31 @@ class ModelRenderer(Widget):
         if point or top:
           self._adjacent_lead_vehicles[i] = self._place_lead(("side", i), d_rel + abs(y_rel), v_rel, point, top,
                                                              scale=ADJACENT_LEAD_SCALE)
+          inner_i, outer_i = (1, 0) if i == 0 else (2, 3)
+          self._adjacent_lane_polygons[i] = self._lane_between_lines(inner_i, outer_i, path_x_array)
+
+  def _lane_between_lines(self, inner_i: int, outer_i: int, path_x_array) -> np.ndarray:
+    """Screen polygon of the lane between two modelV2 lane lines, on the same range as the drawn lane lines."""
+    if len(self._lane_lines) < 4:
+      return np.empty((0, 2), dtype=np.float32)
+    inner, outer = self._lane_lines[inner_i].raw_points, self._lane_lines[outer_i].raw_points
+    n = min(len(inner), len(outer))
+    if n == 0:
+      return np.empty((0, 2), dtype=np.float32)
+    max_distance = np.clip(path_x_array[-1], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE)
+    n = min(n, self._get_path_length_idx(inner[:, 0], max_distance) + 1)
+    edges = []
+    for line in (inner[:n], outer[:n]):
+      proj, valid = self._project_points(line, np.zeros((2, n, 3), dtype=np.float32))
+      edges.append(proj[:2, 0][:, valid].T)
+    if len(edges[0]) < 2 or len(edges[1]) < 2:
+      return np.empty((0, 2), dtype=np.float32)
+    return np.concatenate((edges[0], edges[1][::-1])).astype(np.float32, copy=False)
+
+  def _draw_adjacent_lane_tint(self) -> None:
+    for polygon, color in zip(self._adjacent_lane_polygons, (ADJACENT_LEFT_LEAD_COLOR, ADJACENT_RIGHT_LEAD_COLOR), strict=True):
+      if polygon.shape[0] >= 4:
+        draw_polygon(self._rect, polygon, with_alpha(color, ADJACENT_LANE_TINT_ALPHA))
 
   def _clock(self) -> float:
     return time.monotonic()
