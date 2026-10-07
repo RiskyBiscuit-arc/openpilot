@@ -69,6 +69,7 @@ class DesireHelper:
     self.keep_pulse_timer = 0.0
     self.prev_one_blinker = False
     self.prev_nav_exit_active = False
+    self.nav_exit_rearmed = False
     self.desire = log.Desire.none
     self.nav_desire = log.Desire.none
 
@@ -391,6 +392,7 @@ class DesireHelper:
           self.lane_change_state = LaneChangeState.preLaneChange
           self.lane_change_ll_prob = 1.0
           self.nav_exit_lane_change = True
+          self.nav_exit_rearmed = False
           self.lane_change_direction = nav_exit_direction
 
       # LaneChangeState.preLaneChange
@@ -420,8 +422,9 @@ class DesireHelper:
         blindspot_detected = self._get_combined_blindspot(carstate, self.lane_change_direction, v_asm_enabled=v_asm_enabled)
 
         if self.nav_exit_lane_change:
-          # Driver confirms with the blinker toward the exit (no native BSM; vision ASM can only block)
-          launch_allowed = one_blinker and not blindspot_detected
+          # Driver confirms with the blinker toward the exit (no native BSM; vision ASM can only block).
+          # Every further lane of the same exit also needs a wheel nudge toward it.
+          launch_allowed = one_blinker and (torque_applied or not self.nav_exit_rearmed) and not blindspot_detected
         else:
           if torque_applied:
             self.lane_change_wait_timer = starpilot_toggles.lane_change_delay
@@ -461,10 +464,11 @@ class DesireHelper:
         if self.lane_change_ll_prob > 0.99:
           self.lane_change_direction = LaneChangeDirection.none
           if self.nav_exit_lane_change and nav_exit_active:
-            # an exit can need more than one lane; every further move needs the blinker toward the exit again
+            # an exit can need more than one lane; every further move needs the blinker and a nudge toward the exit
             self.lane_change_state = LaneChangeState.preLaneChange
             self.lane_change_direction = nav_exit_direction
             self.lane_change_completed = False
+            self.nav_exit_rearmed = True
           elif one_blinker:
             self.lane_change_state = LaneChangeState.preLaneChange
           else:

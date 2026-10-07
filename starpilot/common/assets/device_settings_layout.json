@@ -296,7 +296,7 @@
       {
         "key": "NavLanePositioningAllowed",
         "label": "Route Lane Positioning",
-        "description": "Requires Use Route Desires. Route lane keeping on forks and slight bends needs a light steering nudge toward the route. Highway exits (off-ramps within 500 m) start a lane change when you turn on the blinker toward the exit; no nudge is used, and blind spot monitoring (or V-ASM) seeing a car blocks it.",
+        "description": "Requires Use Route Desires. Route lane keeping on forks and slight bends needs a light steering nudge toward the route. Highway exits (off-ramps within 500 m) start the first lane change when you turn on the blinker toward the exit; each further lane also needs a steering nudge toward the exit. Blind spot monitoring (or V-ASM) seeing a car blocks it.",
         "picker_description": "Lets navigation position in lane and request blinker-confirmed exit lane changes.",
         "data_type": "bool",
         "ui_type": "toggle",

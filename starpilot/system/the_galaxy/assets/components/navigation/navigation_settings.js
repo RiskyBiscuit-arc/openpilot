@@ -4,7 +4,7 @@ import { html, reactive } from "/assets/vendor/arrow-core.js";
 // device_settings_layout.json (the single source of setting text). Writes use the same
 // PUT /api/params endpoint as the Device Settings page; route preference defaults use
 // /api/navigation/preferences through the caller's toggleRoutePreference.
-export const LAYOUT_URL = "/assets/components/tools/device_settings_layout.json?v=nav-settings-1";
+export const LAYOUT_URL = "/assets/components/tools/device_settings_layout.json?v=nav-settings-2";
 
 export const NAV_SETTING_KEYS = [
   "NavDesiresAllowed",
@@ -37,7 +37,7 @@ const ROUTE_PREFERENCE_ROWS = [
   { key: "prefer_eco", label: "Prefer fuel-efficient routes" },
 ];
 
-export const EXIT_LANE_CHANGE_INFO = "With Route Lane Positioning on, turning on the blinker toward a highway exit confirms the lane change. It is blocked while blind spot monitoring or V-ASM sees a car on that side. A steering nudge is not used.";
+export const EXIT_LANE_CHANGE_INFO = "With Route Lane Positioning on, turning on the blinker toward a highway exit confirms the lane change. It is blocked while blind spot monitoring or V-ASM sees a car on that side. If the exit needs more lanes, each further lane change also needs a steering nudge toward the exit.";
 
 const navSettingsState = reactive({
   status: "idle",

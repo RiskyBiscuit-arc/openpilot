@@ -750,3 +750,23 @@ def test_nav_exit_opposite_blinker_becomes_normal_lane_change():
   assert helper.nav_exit_lane_change is False
   assert helper.lane_change_direction == LaneChangeDirection.left
   assert helper.lane_change_state == LaneChangeState.preLaneChange
+
+
+def test_nav_exit_second_lane_needs_nudge_with_blinker():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {"valid": True, "maneuverType": "off ramp", "maneuverModifier": "right", "maneuverDistance": 400.0}
+  toggles = make_toggles(nav_exit_lane_change=True, nudgeless=True)
+  helper.update(make_car_state(vEgo=25.0), True, 0.0, make_plan(), toggles)
+  helper.update(make_car_state(vEgo=25.0, rightBlinker=True), True, 0.0, make_plan(), toggles)
+  assert helper.lane_change_state == LaneChangeState.laneChangeStarting
+  for _ in range(300):
+    helper.update(make_car_state(vEgo=25.0, rightBlinker=True), True, 0.0, make_plan(), toggles)
+    if helper.lane_change_state == LaneChangeState.preLaneChange:
+      break
+  assert helper.lane_change_state == LaneChangeState.preLaneChange and helper.nav_exit_lane_change
+  for _ in range(5):
+    helper.update(make_car_state(vEgo=25.0, rightBlinker=True), True, 0.0, make_plan(), toggles)
+  assert helper.lane_change_state == LaneChangeState.preLaneChange
+  helper.update(make_car_state(vEgo=25.0, rightBlinker=True, steeringPressed=True, steeringTorque=-1.5), True, 0.0, make_plan(), toggles)
+  assert helper.lane_change_state == LaneChangeState.laneChangeStarting

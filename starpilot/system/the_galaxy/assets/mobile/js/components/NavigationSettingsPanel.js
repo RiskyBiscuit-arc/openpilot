@@ -122,7 +122,7 @@ export const NavigationSettingsPanel = {
           <div class="gx-row gx-navigation-exit-info">
             <div class="gx-row__info">
               <span class="gx-row__label">How exit lane changes work</span>
-              <span class="gx-row__desc">With Route Lane Positioning on, turning on the blinker toward a highway exit confirms the lane change. It is blocked while blind spot monitoring or V-ASM sees a car on that side. A steering nudge is not used.</span>
+              <span class="gx-row__desc">With Route Lane Positioning on, turning on the blinker toward a highway exit confirms the lane change. It is blocked while blind spot monitoring or V-ASM sees a car on that side. If the exit needs more lanes, each further lane change also needs a steering nudge toward the exit.</span>
             </div>
           </div>
         </GalaxySection>
