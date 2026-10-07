@@ -140,3 +140,6 @@ Pipfile
 
 # per-session compact checkpoints (see CLAUDE.md); never committed
 .claude/compact-state*.md
+
+# jetlink warp JITs, built on device by starpilot/jetlink_adapter/SConscript
+starpilot/jetlink_adapter/models/
