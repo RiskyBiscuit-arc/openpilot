@@ -6,3 +6,5 @@ __pycache__/
 user.bin
 user_patched.bin
 user_patched.enc
+
+.ruff_cache/

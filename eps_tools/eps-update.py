@@ -27,16 +27,9 @@ DEFAULT_SEED_TIMEOUT_S = 120.0
 # after a session change; don't send the first seed request into that window.
 SESSION_SETTLE_S = 0.5
 
-DECRYPT_LOOKUP = {144: 72, 218: 55, 255: 255, 164: 1, 195: 26, 99: 2, 28: 178, 205: 158, 125: 138, 45: 118, 222: 98, 142: 78, 62: 58, 243: 38, 163: 18, 83: 254, 3: 234, 172: 214, 92: 194, 12: 174, 189: 154, 109: 134, 29: 114, 206: 94, 126: 74, 46: 54, 227: 34, 147: 14, 113: 0, 67: 250, 236: 230, 156: 210, 76: 190, 252: 170, 173: 150, 93: 130, 13: 110, 148: 253, 120: 159, 199: 148, 198: 137, 77: 126, 23: 104, 73: 83, 203: 73, 78: 62, 123: 53, 254: 42, 43: 33, 90: 23, 161: 12, 10: 3, 132: 249, 191: 239, 226: 220, 197: 201, 248: 191, 117: 181, 34: 172, 37: 161, 88: 151, 141: 142, 8: 131, 134: 121, 185: 111, 54: 101, 190: 90, 57: 79, 128: 68, 139: 57, 14: 46, 138: 35, 131: 10, 100: 241, 1: 228, 146: 200, 133: 185, 168: 171, 104: 155, 40: 139, 251: 85, 94: 66, 91: 45, 103: 124, 55: 112, 231: 156, 80: 56, 224: 92, 102: 113, 96: 60, 98: 188, 97: 252, 140: 206, 122: 31, 232: 187, 16: 40, 202: 51, 26: 7, 239: 251, 5: 153, 219: 77, 119: 128, 21: 157, 238: 102, 180: 5, 217: 119, 30: 50, 7: 100, 32: 44, 183: 144, 50: 176, 110: 70, 157: 146, 2: 164, 44: 182, 145: 8, 58: 15, 27: 29, 64: 52, 9: 67, 31: 199, 179: 22, 42: 11, 193: 20, 211: 30, 129: 4, 241: 32, 74: 19, 178: 208, 247: 160, 112: 64, 242: 224, 114: 192, 165: 193, 0: 36, 59: 37, 196: 9, 154: 39, 75: 41, 72: 147, 249: 127, 162: 204, 130: 196, 229: 209, 182: 133, 48: 48, 86: 109, 240: 96, 137: 99, 151: 136, 209: 24, 108: 198, 181: 197, 212: 13, 244: 21, 11: 25, 118: 117, 228: 17, 214: 141, 52: 229, 160: 76, 115: 6, 106: 27, 56: 143, 25: 71, 36: 225, 194: 212, 208: 88, 187: 69, 171: 65, 153: 103, 38: 97, 207: 243, 82: 184, 184: 175, 188: 218, 213: 205, 121: 95, 15: 195, 81: 248, 24: 135, 70: 105, 150: 125, 174: 86, 158: 82, 220: 226, 201: 115, 71: 116, 51: 246, 177: 16, 176: 80, 22: 93, 39: 108, 159: 231, 223: 247, 186: 47, 169: 107, 245: 213, 235: 81, 192: 84, 124: 202, 175: 235, 84: 237, 79: 211, 234: 59, 143: 227, 237: 166, 33: 236, 253: 106, 65: 244, 111: 219, 200: 179, 101: 177, 17: 232, 20: 221, 166: 129, 60: 186, 61: 122, 167: 140, 204: 222, 87: 120, 41: 75, 135: 132, 136: 163, 49: 240, 250: 63, 107: 49, 170: 43, 18: 168, 221: 162, 35: 242, 225: 28, 149: 189, 85: 173, 152: 167, 95: 215, 53: 165, 89: 87, 66: 180, 6: 89, 47: 203, 210: 216, 215: 152, 233: 123, 116: 245, 127: 223, 19: 238, 69: 169, 105: 91, 4: 217, 216: 183, 68: 233, 63: 207, 155: 61, 246: 149, 230: 145}
-
-# Checksum offsets embedded in decrypted firmware, keyed by firmware data length.
-# Each entry is (checksum_func_index, offset, label):
-#   0 = sum of 16-bit BE words from 0..offset must equal value stored at offset
-#   1 = negative-sum variant (same range, negated)
-FIRMWARE_CHECKSUM_OFFSETS = {
-  0x6c000: [(0, 0x6bf80, "sum"), (1, 0x6bffe, "negative-sum")],  # CR-V TLA, Insight TXM (524288 byte bin)
-  0x4c000: [(0, 0x4bf80, "sum"), (1, 0x4bffe, "negative-sum")],  # Civic TBA/TEA/TGG/TGN, Clarity TRW (393216 byte bin)
-}
+# Checksum constants and validation are canonical in check_rwd.py.
+# The former duplicate validator was retired: unknown lengths used to pass,
+# and its checksum assertion could be disabled by optimized Python.
 
 def auto_int(i):
   return int(i, 0)
@@ -54,35 +47,8 @@ def read_file(fn):
   return f_data
 
 def validate_fw(fw_encrypted):
-  assert len(fw_encrypted.firmware_blocks) == 1
-  fw_len = fw_encrypted.firmware_blocks[0]["length"]
-
-  print(f"\n  [1] Firmware checksums")
-  print(f"      Firmware length: 0x{fw_len:x} ({fw_len} bytes)")
-
-  cs_defs = FIRMWARE_CHECKSUM_OFFSETS.get(fw_len)
-  if cs_defs is None:
-    print(f"      WARNING: unknown firmware length 0x{fw_len:x} — checksums not verified")
-    return
-
-  decrypted = bytes(DECRYPT_LOOKUP[b] for b in fw_encrypted.firmware_encrypted[0])
-
-  all_passed = True
-  for func_idx, off, label in cs_defs:
-    stored = struct.unpack('!H', decrypted[off:off+2])[0]
-    if func_idx == 0:
-      calc = sum(struct.unpack('!H', decrypted[i:i+2])[0] for i in range(0, off, 2)) & 0xFFFF
-    else:
-      calc = sum(-struct.unpack('!H', decrypted[i:i+2])[0] for i in range(0, off, 2)) & 0xFFFF
-    ok = stored == calc
-    all_passed = all_passed and ok
-    status = 'PASS ✓' if ok else f'FAIL ✗  (expected 0x{calc:04x})'
-    print(f"      0x{off:05x}  {label:<14}  stored: 0x{stored:04x}  {status}")
-
-  print(f"\n  {'='*40}")
-  print(f"  Firmware checksum: {'PASS ✓' if all_passed else 'FAIL ✗'}")
-
-  assert all_passed, "Firmware checksum validation failed — do not flash this file"
+  from check_rwd import validate_firmware
+  validate_firmware(fw_encrypted)
 
 
 def calculate_session_key(const_bytes, seed_bytes):
@@ -184,9 +150,12 @@ if __name__ == "__main__":
                            f"reports a delay/lockout (default {DEFAULT_SEED_TIMEOUT_S:.0f})")
   args = parser.parse_args()
 
-  fw = x5a(read_file(args.rwd))
-  if not args.skip_checksum:
-    validate_fw(fw)
+  try:
+    fw = x5a(read_file(args.rwd))
+    if not args.skip_checksum:
+      validate_fw(fw)
+  except (OSError, ValueError) as e:
+    raise SystemExit(f"Image validation failed: {e}") from e
 
   print(fw)
 
@@ -242,7 +211,8 @@ if __name__ == "__main__":
     debug_output = debug_output + [data]
 
     print("Requesting download")
-    assert len(fw.firmware_blocks) == 1
+    if len(fw.firmware_blocks) != 1:
+      raise ValueError("exactly one firmware block is required")
     block = fw.firmware_blocks[0]
     length = block["length"]
     max_chunk_size = uds_client.request_download(block["start"], length)
@@ -272,13 +242,17 @@ if __name__ == "__main__":
     debug_output = debug_output + [data]
 
   except Exception as e:
-    print(traceback.format_exc())
+    expected_abort = isinstance(e, RuntimeError) and str(e) == "Safe mode: aborting before mutating actions"
+    if expected_abort:
+      print(str(e))
+    else:
+      print(traceback.format_exc())
     if not isinstance(uds_client, mock.Mock):
       leave_diagnostic_session(uds_client)
     # Dry-run intentionally raises here; treat that as success. Any other failure
     # must be a non-zero exit so callers (e.g. flash.py) don't treat it as done.
-    if isinstance(e, RuntimeError) and str(e) == "Safe mode: aborting before mutating actions":
-      pass
+    if expected_abort:
+      sys.exit(0)
     else:
       sys.exit(1)
 

@@ -10872,3 +10872,32 @@ https://github.com/RiskyBiscuit-arc/eps-tools at
 now documents importing the prefixed archive at the openpilot root. Removed
 superseded root-layout subtree instructions. No second working directory,
 production code change, hardware test, flash, or vehicle validation.
+
+## 230. EPS tooling outcomes clarified and image validation enforced (2026-10-06). D-096.
+
+[CONFIRMED, static and hardware-free unit tests] Published standalone commit
+`a67d005480801bccf516fff4f3b6d7e075f4abe9`: 40 files under eps_tools/, no RWD
+images, matching tested production/test hashes. README recommends flash.py;
+eps-update.py is the older alternative/backend. Both firmware-folder READMEs
+and contributor instructions reflect this. Successful programming offers an
+optional neutral sanity check; failed programming retains its failure status.
+eps-diag defaults to communication results, uses --recovery for troubleshooting,
+separates session acceptance from ID reads, labels cached identifiers, restores
+default sessions, and releases Panda connections. It no longer treats silence
+as a brick or tells a responding ECU to reflash automatically.
+
+Validation now rejects malformed containers and unknown checksum coverage,
+returns nonzero CLI status for failures, and remains active under optimized
+Python. The explicit firmware-checksum override cannot bypass structure/file
+checks. Production 0x31 parsing also had bytes/string errors fixed; legacy
+rwd_xray reference code was not changed. Exact checksum constants and the
+programming sequence remain unchanged.
+
+Verification: `python3 -m unittest discover -s eps_tools/tests -v` — 18 passed,
+including real CLI paths with fake transports and optimized-Python subprocesses.
+Two negative controls deliberately broke production communication classification
+and the file-checksum gate: each selected regression failed; code was restored
+and the full suite passed. Ruff passed for every changed Python file using the
+standalone tools config; git diff whitespace checks passed. No hardware, live
+Panda, route replay, vehicle driving, live UDS timing, recovery, steering operation,
+closed-loop tests, radar/longitudinal build, or device deployment were performed.

@@ -13,6 +13,10 @@ library. Flashing and diagnostics also need `panda`, `opendbc`, and `tqdm` from 
 compatible openpilot installation. This repository does not install or replace
 those dependencies. Run scripts from the tools directory with the installation
 on `PYTHONPATH`, for example `PYTHONPATH=/data/openpilot python3 flash.py`.
+`flash.py` is the recommended flasher; `eps-update.py` is the older manual
+alternative and the guided script's programming backend. `eps-diag.py` normally
+checks communication; use `--recovery` to request troubleshooting guidance.
+
 For direct standalone users, clone this repository and use `git pull --ff-only`
 to update. Then `cd eps_tools` to run scripts. Keep your locally supplied
 firmware under `eps_tools/rwd/` in the clone.
@@ -53,3 +57,12 @@ Do not treat the legacy Python-2 reference tools as Python-3 executables.
 Hardware changes require explicit bench/vehicle evidence; static checks cannot
 validate UDS timing, ECU recovery, or live steering. Do not flash hardware as
 part of a contribution check. Do not add firmware files or generated caches.
+
+Run the hardware-free regression suite from the openpilot or standalone repo root:
+
+```sh
+python3 -m unittest discover -s eps_tools/tests -v
+```
+
+Tests use synthetic containers and fake transports, never firmware downloads or
+live Panda access. Optimized-Python validation is covered in subprocesses.

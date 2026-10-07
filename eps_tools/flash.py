@@ -296,12 +296,12 @@ def exit_with_op_stopped(msg):
     sys.exit(1)
 
 
-def post_flash_menu(env, bus, eps_addr=None):
+def post_flash_menu(env, bus, eps_addr=None, flash_succeeded=True):
     """After a flash: optionally run eps-diag (loops back), restore op, or reboot."""
     diag = os.path.join(HERE, "eps-diag.py")
     while True:
         print("\nWhat next?")
-        print("  [1] Run eps-diag.py  — post-flash EPS check (returns here after)")
+        print("  [1] Optional EPS communication sanity check (returns here after)")
         print("  [2] Restore openpilot — it was stopped for flashing")
         print("  [3] Reboot the device (sudo reboot)")
         choice = input("Select 1/2/3 (q = leave openpilot stopped and exit): ").strip().lower()
@@ -311,6 +311,8 @@ def post_flash_menu(env, bus, eps_addr=None):
             cmd = [sys.executable, diag, "-b", str(bus)]
             if eps_addr is not None:
                 cmd += ["--addr", hex(eps_addr)]
+            if not flash_succeeded:
+                cmd.append("--recovery")
             subprocess.run(cmd, env=env, cwd=HERE)
         elif choice == "2":
             restore_openpilot()
@@ -368,7 +370,7 @@ def run_dry_run(rel, bus, skip_checksum, env, name, seed_timeout=None):
     effective = DEFAULT_SEED_TIMEOUT_S if seed_timeout is None else seed_timeout
     while True:
         print(f"\n=== DRY RUN: {name} (validates + auth flow, stops before erase) ===\n")
-        _, combined = run_and_tee(
+        rc, combined = run_and_tee(
             run_eps_update(rel, bus, skip_checksum, danger=False, seed_timeout=effective), env)
         # Mock UDS client also reaches the safe-abort marker; require a real Panda.
         if REAL_CLIENT_MARKER not in combined:
@@ -387,12 +389,12 @@ def run_dry_run(rel, bus, skip_checksum, env, name, seed_timeout=None):
                 "\nStopping while the EPS delay is still active — NOT flashing.\n"
                 "Leave the car in accessory mode (ignition off restarts the timer) and re-run."
             )
-        if DRY_RUN_OK_MARKER not in combined:
+        if rc != 0 or DRY_RUN_OK_MARKER not in combined:
             exit_with_op_stopped(
                 "\nDry run did NOT reach the safe abort point — NOT flashing. Review the output above."
             )
         break
-    print("Dry run OK — real client + safe abort (the traceback above is expected for a dry run).")
+    print("Dry run completed — no erase or programming performed.")
     print("Note: some EPS units lock security access briefly after a dry run.")
     print("If the real flash fails with a security/timeout error, wait or power-cycle, then retry.")
 
@@ -422,7 +424,7 @@ def flash_failure_menu(rel, bus, skip_checksum, env, name, rc, seed_timeout=None
             rc = run_real_flash(rel, bus, skip_checksum, env, name, seed_timeout)
             if rc == 0:
                 print(f"\nFlash process exited ({rc}).")
-                print("Flash reported success (exit 0).")
+                print("Firmware programming completed. You can optionally check EPS communication below.")
                 return rc
             continue
         if choice == "m":
@@ -516,18 +518,18 @@ def main():
 
     print(f"\n=== READY TO FLASH: {name} (bus {bus}) ===")
     print("Make sure the car is in accessory mode (ignition ON, engine OFF, A/C off).")
-    print("If it crashes mid-flash, the EPS is recoverable: just run this again.")
+    print("A failed flash may require recovery with a matching stock image; recovery is not guaranteed.")
     if input("Type 'FLASH' to commit the real flash (--danger): ").strip() != "FLASH":
         exit_with_op_stopped("Aborted — no flash performed.")
 
     rc = run_real_flash(rel, bus, skip_checksum, env, name, args.seed_timeout)
     if rc == 0:
         print(f"\nFlash process exited ({rc}).")
-        print("Flash reported success (exit 0).")
+        print("Firmware programming completed. You can optionally check EPS communication below.")
     else:
         rc = flash_failure_menu(rel, bus, skip_checksum, env, name, rc, args.seed_timeout)
 
-    post_flash_menu(env, bus, eps_addr=eps_addr)
+    post_flash_menu(env, bus, eps_addr=eps_addr, flash_succeeded=rc == 0)
     sys.exit(rc)
 
 

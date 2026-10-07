@@ -2164,3 +2164,42 @@ current contributor instructions. Canonical import is now `git archive
 eps-tools/main eps_tools | tar -x -C .` from the fork root after fetching and
 reviewing the target SHA. Rejected: keeping root-level scripts or duplicating
 the tools in both locations. Archive deletion caveats from D-094 remain.
+
+## D-096 — Separate routine EPS communication checks from recovery; enforce validation outside assertions
+
+**Decided 2026-10-06; explicit owner-approved plan, static/unit-test evidence only.**
+Canonical standalone artifact: `a67d005480801bccf516fff4f3b6d7e075f4abe9`
+in RiskyBiscuit-arc/eps-tools. Tested production/test blob hashes match this
+artifact; origin checkout base was `a10f9595b4caf6d71ea1e3c2a90bb6609f99cfb3`.
+No vehicle route was used: all transport evidence here is fake-transport unit testing.
+
+`flash.py` is the documented entry point; `eps-update.py` is the older manual
+alternative and internal backend. Programming completion is distinct from steering
+operation. Its optional sanity check pins the flashed target; unsuccessful attempts
+request explicit recovery guidance and keep their failure exit status. Expected
+dry runs no longer print tracebacks and require exit 0 plus the real-client and
+safe-abort markers. Guaranteed ECU recovery claims are retired.
+
+`eps-diag.py` now defaults to neutral communication results, with `--recovery`
+for troubleshooting. Rejected: advising a reflash after a healthy response or
+classifying passive-only traffic as a stuck bootloader. Negative UDS responses
+confirm communication, while accepted sessions and ID reads are distinct. Cached
+identifiers cannot establish current firmware. Active checks restore default
+sessions and all acquired Panda connections are explicitly released. Codes 0/1/2
+mean confirmed/unconfirmed/setup or runtime failure; scan success may be another ECU.
+
+Unknown firmware checksum coverage formerly returned success; validation-critical
+assertions could disappear under optimized Python. Both mechanisms are retired.
+Shared validation lives in check_rwd.py, the duplicate flasher constants/validator
+were removed, and production parser guards raise explicit exceptions. Unknown
+coverage requires an explicit firmware-checksum override; malformed containers,
+payload length errors, and file checksum errors remain blocked. The 0x31 parser's
+residual Python-2 string/bytes errors were corrected alongside explicit guards,
+with synthetic round-trip coverage. Vendored reference code is unchanged.
+
+18 hardware-free tests pass; two deliberate production mutations prove the
+communication and optimized checksum tests fail when those gates break, then
+the restored suite passes. Standalone Python-3.9 lint configuration checks
+correctness without inheriting openpilot's ban on stdlib unittest. No erase/program
+sequence, firmware constant, bus default, or explicit flash confirmation changed.
+No live UDS timing, ECU recovery, steering operation, or closed loop was verified.

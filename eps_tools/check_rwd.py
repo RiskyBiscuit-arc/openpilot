@@ -12,93 +12,53 @@ FIRMWARE_CHECKSUMS = {
 }
 
 
-def check(path):
-    print(f"\n{'─'*60}")
-    print(f"  {path}")
-    print(f"{'─'*60}")
-
+def validate_firmware(fw):
+    """Validate supported firmware checksums; unknown coverage is not a pass."""
+    if len(fw.firmware_blocks) != 1:
+        raise ValueError("exactly one firmware block is required")
+    length = fw.firmware_blocks[0]["length"]
+    encrypted = fw.firmware_encrypted[0]
+    if len(encrypted) != length:
+        raise ValueError("firmware length incorrect")
+    definitions = FIRMWARE_CHECKSUMS.get(length)
+    if definitions is None:
+        raise ValueError(f"not fully validated: unknown firmware checksum coverage (0x{length:x})")
     try:
-        with open(path, 'rb') as f:
-            raw = f.read()
-    except FileNotFoundError:
-        print(f"  ERROR: file not found")
-        return False
-
-    print(f"  Size: {len(raw)} bytes (0x{len(raw):x})")
-
-    # 1. File checksum (last 4 bytes, little-endian 32-bit)
-    stored_fc  = struct.unpack('<L', raw[-4:])[0]
-    calc_fc    = sum(raw[:-4]) & 0xFFFFFFFF
-    file_ok    = stored_fc == calc_fc
-    print(f"\n  [1] File checksum")
-    print(f"      Stored:     0x{stored_fc:08x}")
-    print(f"      Calculated: 0x{calc_fc:08x}  {'PASS ✓' if file_ok else 'FAIL ✗'}")
-
-    # 2. Parse 0x5A header to locate firmware block
-    if raw[0:1] != b'\x5a':
-        print(f"\n  ERROR: not a 0x5A format RWD (got 0x{raw[0]:02x})")
-        return False
-
-    idx = 3
-    for _ in range(6):
-        cnt = raw[idx]; idx += 1
-        for _ in range(cnt):
-            length = raw[idx]; idx += 1
-            idx += length
-
-    fw_start = struct.unpack('!I', raw[idx:idx+4])[0]; idx += 4
-    fw_len   = struct.unpack('!I', raw[idx:idx+4])[0]; idx += 4
-    print(f"\n  [2] Firmware block")
-    print(f"      Flash address: 0x{fw_start:08x}   Length: 0x{fw_len:x} ({fw_len} bytes)")
-
-    # 3. Decrypt
-    enc = raw[idx:idx+fw_len]
-    try:
-        dec = bytes(DECRYPT_LOOKUP[b] for b in enc)
+        decrypted = bytes(DECRYPT_LOOKUP[b] for b in encrypted)
     except KeyError as e:
-        print(f"\n  ERROR: encrypted byte 0x{e.args[0]:02x} not in lookup table")
+        raise ValueError(f"unknown encrypted byte: {e.args[0]:02x}") from e
+    for func, offset, label in definitions:
+        stored = struct.unpack('!H', decrypted[offset:offset + 2])[0]
+        words = struct.unpack(f'!{offset // 2}H', decrypted[:offset])
+        calculated = (sum(words) * (-1 if func else 1)) & 0xffff
+        if stored != calculated:
+            raise ValueError(f"firmware checksum failed: {label} at 0x{offset:x}")
+        print(f"  Firmware {label} checksum: PASS")
+
+
+def check(path):
+    from rwd_format.x5a import x5a
+    print(f"\nChecking {path}")
+    try:
+        with open(path, 'rb') as stream:
+            fw = x5a(stream.read())
+        print("  Container and file checksum: PASS")
+        validate_firmware(fw)
+    except (OSError, ValueError) as e:
+        print(f"  NOT VALIDATED: {e}")
         return False
+    print("  Fully validated: PASS")
+    return True
 
-    # 4. Firmware checksums
-    print(f"\n  [3] Firmware checksums")
-    cs_defs = FIRMWARE_CHECKSUMS.get(fw_len)
-    if cs_defs is None:
-        print(f"      WARNING: unknown firmware length 0x{fw_len:x} — checksums not verified")
-        all_fw_ok = None
-    else:
-        all_fw_ok = True
-        for func_idx, off, label in cs_defs:
-            stored = struct.unpack('!H', dec[off:off+2])[0]
-            if func_idx == 0:
-                calc = sum(struct.unpack('!H', dec[i:i+2])[0] for i in range(0, off, 2)) & 0xFFFF
-            else:
-                calc = sum(-struct.unpack('!H', dec[i:i+2])[0] for i in range(0, off, 2)) & 0xFFFF
-            ok = stored == calc
-            all_fw_ok = all_fw_ok and ok
-            status = 'PASS ✓' if ok else f'FAIL ✗  (expected 0x{calc:04x})'
-            print(f"      0x{off:05x}  {label:<14}  stored: 0x{stored:04x}  {status}")
 
-    # 5. Summary
-    fw_str = ('PASS ✓' if all_fw_ok else 'FAIL ✗') if all_fw_ok is not None else 'SKIP'
-    overall = file_ok and (all_fw_ok is not False)
-    print(f"\n  {'='*40}")
-    print(f"  File checksum:     {'PASS ✓' if file_ok else 'FAIL ✗'}")
-    print(f"  Firmware checksum: {fw_str}")
-    print(f"  Overall:           {'ALL GOOD ✓' if overall else 'CHECKSUM FAILURE ✗'}")
-
-    return overall
+def main(argv=None):
+    paths = sys.argv[1:] if argv is None else argv
+    if not paths:
+        print("Usage: python3 check_rwd.py <file.rwd> [file2.rwd ...]")
+        return 1
+    results = [check(path) for path in paths]
+    return 0 if all(results) else 1
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print(f"Usage: python3 {sys.argv[0]} <file.rwd> [file2.rwd ...]")
-        sys.exit(1)
-
-    results = [(path, check(path)) for path in sys.argv[1:]]
-
-    if len(results) > 1:
-        print(f"\n{'─'*60}")
-        print("  SUMMARY")
-        print(f"{'─'*60}")
-        for path, ok in results:
-            print(f"  {'PASS ✓' if ok else 'FAIL ✗'}  {path}")
+    sys.exit(main())

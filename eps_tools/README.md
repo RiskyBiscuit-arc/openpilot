@@ -20,7 +20,8 @@ current opendbc layout and adding the safety checks.
 
 ```
 eps_tools/
-  eps-update.py     UDS .rwd flasher (validate + erase/program over CAN)
+  flash.py          recommended guided flasher (selection, validation, bus detection)
+  eps-update.py     older manual alternative; also used internally by flash.py
   check_rwd.py      offline .rwd checksum validator (stdlib only)
   eps-diag.py       EPS CAN liveness/diagnostic (sniff, UDS ping, part number)
   rwd_format/       vendored Python-3 .rwd container parser (0x5A/0x31)
@@ -34,34 +35,47 @@ Run the scripts **from this folder** so `rwd_format` resolves; `opendbc`/`panda`
 come from the openpilot install (prefix with `PYTHONPATH=/data/openpilot` if you
 hit import errors).
 
-## How to flash
+## Recommended: guided flash.py
 
-1. Make sure the comma power is connected to the car's OBD2 port.
-2. With the car **OFF**, stop openpilot over SSH:
-   ```
-   sudo systemctl stop comma
-   tmux kill-session -t comma
-   ```
-3. Put the car in full **accessory mode** (ignition ON, engine OFF). Turn off the
-   A/C to avoid draining the battery.
-4. **Dry run first** — validates the image and walks the UDS/security flow but
-   aborts *before* any mutating action:
-   ```
-   cd eps_tools
-   python3 eps-update.py rwd/REPLACE_WITH_YOUR_FIRMWARE.rwd -b 1
-   ```
-   When it aborts before performing mutating actions, that's your sign it's ready.
-5. **Flash for real** once you're committed:
-   ```
-   python3 eps-update.py rwd/REPLACE_WITH_YOUR_FIRMWARE.rwd -b 1 --danger
-   ```
-   You'll see warnings/errors on the dash while it flashes — that's normal. When
-   it reaches "Resetting ECU" with no traceback, turn the car off. Done.
+Supply a firmware image for your exact ECU under `rwd/`; firmware is not included
+in the standalone repository. Keep a validated matching stock recovery image.
+Use a persistent copy such as `/data/media/0/eps_tools/` on the comma.
 
-Example:
+```sh
+cd /data/media/0/eps_tools
+PYTHONPATH=/data/openpilot python3 flash.py
 ```
-python3 eps-update.py rwd/39990-TLA-A040-linear-max.rwd -b 1 --danger
+
+The guided script lists compatible images when the cached car identification is
+available, checks the selected image, prompts you to turn the car OFF, and stops
+openpilot. It then prompts for ignition ON (engine OFF), detects the CAN bus,
+offers the recommended dry run, and requires you to type `FLASH` before programming.
+Follow the prompts; do not bypass image validation or the dry run for normal use.
+
+After **“Firmware programming completed”**, the optional communication sanity
+check can confirm that the EPS responds. It does not mean a failure was detected,
+and it does not verify steering operation or firmware correctness. The final menu
+also offers to restore openpilot or reboot. A failed programming attempt is clearly
+reported and has a separate retry/recovery flow; recovery is not guaranteed.
+
+## Older alternative: eps-update.py
+
+`eps-update.py` is the older manual interface and remains the programming backend
+used by `flash.py`. Prefer the guided script. For manual use, stop openpilot with
+the car OFF (`sudo systemctl stop comma`, then `tmux kill-session -t comma`),
+then turn ignition ON with the engine OFF. Select the correct CAN bus explicitly.
+From the persistent tools folder:
+
+```sh
+# Dry run: stops before erase/programming.
+PYTHONPATH=/data/openpilot python3 eps-update.py rwd/YOUR_FIRMWARE.rwd -b 1
+# Actual programming: explicit --danger is required.
+PYTHONPATH=/data/openpilot python3 eps-update.py rwd/YOUR_FIRMWARE.rwd -b 1 --danger
 ```
+
+An expected dry-run stop is printed without a traceback. Bus 1 is the manual
+default, not a guarantee that it is correct for your vehicle. Restore openpilot
+when finished, or reboot the device.
 
 ### `--skip-checksum` (not recommended)
 If a firmware isn't covered by the checksum checker, you can add `--skip-checksum`.
@@ -71,12 +85,29 @@ use it on an image you trust.
 python3 eps-update.py rwd/SOME_FIRMWARE.rwd -b 1 --skip-checksum --danger
 ```
 
-## Verify it worked
-Turn the car back on and move the wheel by hand — any power-steering assist means
-the flash succeeded. To confirm over CAN:
+## Optional EPS communication sanity check
+
+With ignition ON and openpilot stopped so the Panda is available:
+
+```sh
+PYTHONPATH=/data/openpilot python3 eps-diag.py
+# Pin the bus/address if known:
+PYTHONPATH=/data/openpilot python3 eps-diag.py -b 1 --addr 0x18DA30F1
+# Add troubleshooting guidance only when investigating a failed flash:
+PYTHONPATH=/data/openpilot python3 eps-diag.py -b 1 --recovery
 ```
-python3 eps-diag.py -b 1
-```
+
+Normal results are **communication confirmed**, **communication not confirmed**,
+or **check could not run**. Negative UDS responses still confirm communication;
+unsupported sessions and unreadable software IDs are reported separately.
+Passive silence at the diagnostic response address is inconclusive, not proof of
+a dead ECU. Cached CarParams identifiers are labeled and cannot confirm current
+firmware. No communication result proves steering operation or diagnoses a brick.
+
+Exit codes are 0 for confirmed communication, 1 for unconfirmed communication,
+and 2 for setup/runtime failure. `--sniff-only` returns 1 when no response frames
+are observed. `--scan` returns 0 when any scanned ECU responds, which does not
+specifically confirm the EPS. Cleanup warnings do not replace the check result.
 
 ## If a flash fails / crashes
 A failure after erase can leave the EPS without power-steering assist. Recovery
@@ -92,6 +123,11 @@ pull the image/parser out from under a flash.
 python3 check_rwd.py rwd/39990-TLA-A040-linear-max.rwd
 python3 check_rwd.py rwd/*.rwd
 ```
+
+Unsupported checksum coverage is reported as not fully validated and returns a
+nonzero exit status, as do malformed images and failed checksums. The explicit
+`--skip-checksum` flow can bypass firmware checksum checks, but cannot bypass
+container structure, declared payload length, or the file checksum.
 
 See `rwd/README.md` for local firmware handling. Firmware is excluded from the
 standalone tools repository.
