@@ -2148,3 +2148,19 @@ not remove retired tooling, which must be reviewed and removed explicitly.
 Update instructions are in `eps_tools/CONTRIBUTING.md`. No runtime tooling was
 changed; ten production Python files passed static syntax checks. This is not
 bench, flashing, vehicle, or closed-loop validation.
+
+## D-095 — Distribute the standalone tools under eps_tools/ for drop-in imports
+
+**Decided 2026-10-06; explicit owner request.** Standalone commit
+`a1009ebbbf0dadcf03752848798401d3444ea4e2` moves all 38 files beneath
+`eps_tools/`, retaining `eps_tools/rwd/README.md` and excluding firmware.
+[CONFIRMED, Git tree/blob comparison] All 37 files other than updated
+CONTRIBUTING.md retain identical contents and modes from `ee6a2cb46a486d3e9c0091eaea192755067b4759`.
+No executable tooling changed.
+
+Supersedes D-094's root-layout subtree commands: applying those commands to
+this layout would produce `eps_tools/eps_tools/`. They were removed from the
+current contributor instructions. Canonical import is now `git archive
+eps-tools/main eps_tools | tar -x -C .` from the fork root after fetching and
+reviewing the target SHA. Rejected: keeping root-level scripts or duplicating
+the tools in both locations. Archive deletion caveats from D-094 remain.

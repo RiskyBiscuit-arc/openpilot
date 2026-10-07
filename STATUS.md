@@ -10861,3 +10861,14 @@ bench test, flash, vehicle drive, dependency import/build, or closed-loop
 validation was performed. The existing directory remains a plain vendored
 snapshot; subtree instructions apply to new integrations, not an automatic
 conversion of this fork.
+
+## 229. Standalone EPS tools changed to drop-in eps_tools/ layout (2026-10-06). D-095.
+
+[CONFIRMED, complete local Git tree/blob comparison and GitHub tree readback]
+https://github.com/RiskyBiscuit-arc/eps-tools at
+`a1009ebbbf0dadcf03752848798401d3444ea4e2` contains 38 files, all under
+`eps_tools/`, with its firmware folder retained and no `.rwd` files.
+37 unchanged files have identical blob hashes and modes; CONTRIBUTING.md
+now documents importing the prefixed archive at the openpilot root. Removed
+superseded root-layout subtree instructions. No second working directory,
+production code change, hardware test, flash, or vehicle validation.

@@ -14,45 +14,37 @@ compatible openpilot installation. This repository does not install or replace
 those dependencies. Run scripts from the tools directory with the installation
 on `PYTHONPATH`, for example `PYTHONPATH=/data/openpilot python3 flash.py`.
 For direct standalone users, clone this repository and use `git pull --ff-only`
-to update. Keep your locally supplied firmware under `rwd/`.
+to update. Then `cd eps_tools` to run scripts. Keep your locally supplied
+firmware under `eps_tools/rwd/` in the clone.
 
-## Import into a fork that does not yet have eps_tools/
+## Drop into openpilot or update an existing fork
 
-From the fork root, with a clean working tree:
-
-```sh
-git remote add eps-tools https://github.com/RiskyBiscuit-arc/eps-tools.git
-git fetch eps-tools main
-git subtree add --prefix=eps_tools eps-tools main --squash
-```
-
-Then fetch updates with:
-
-```sh
-git subtree pull --prefix=eps_tools eps-tools main --squash
-```
-
-The subtree pins a reviewed commit; updates are deliberate and committed to your
-fork. Resolve any local changes before merging updates.
-
-## Existing forks with a plain eps_tools/ directory
-
-Do not run `subtree add` over an existing directory. Until a deliberate subtree
-migration, import a reviewed snapshot instead:
+Every distributed file lives under `eps_tools/` in the standalone repository.
+Copy that folder into your openpilot root. For a Git-based snapshot import,
+run from the openpilot root with a clean working tree:
 
 ```sh
 git remote add eps-tools https://github.com/RiskyBiscuit-arc/eps-tools.git
 git fetch eps-tools main
 git rev-parse eps-tools/main
-git archive eps-tools/main | tar -x -C eps_tools
+git archive eps-tools/main eps_tools | tar -x -C .
 git diff -- eps_tools
 ```
 
-Add the remote only once. Record the imported SHA in your commit. An archive
-updates files but does not remove retired files: compare `git ls-tree -r
---name-only eps-tools/main` with your local tools and explicitly retire removed
-tooling. Preserve local firmware; the remote contains no `.rwd` files.
+Add the remote only once. Record the imported SHA in your commit. The archive
+already contains the `eps_tools/` prefix: extracting into `eps_tools/` would
+incorrectly create `eps_tools/eps_tools/`.
+
+An archive updates files but does not remove retired files: compare
+`git ls-tree -r --name-only eps-tools/main -- eps_tools/` with your local tools
+and explicitly retire removed tooling. Preserve local firmware; the remote
+contains no `.rwd` files. Review conflicts with any local edits before importing.
 Stage only the reviewed tooling paths and commit before handing off.
+
+The repository no longer has scripts at its root. The former direct
+`git subtree add/pull --prefix=eps_tools ... main` instructions are superseded;
+using them with this layout would produce an extra nested folder. Use the
+snapshot import above.
 
 ## Validation
 
