@@ -11,8 +11,10 @@ upstream code; preserve its MIT license and attribution.
 Use Python 3.9 or newer. Offline `check_rwd.py` and `rwd_format/` use the standard
 library. Flashing and diagnostics also need `panda`, `opendbc`, and `tqdm` from a
 compatible openpilot installation. This repository does not install or replace
-those dependencies. Run scripts from the tools directory with the installation
-on `PYTHONPATH`, for example `PYTHONPATH=/data/openpilot python3 flash.py`.
+those dependencies. Run scripts from the tools directory, for example
+`cd /data/openpilot/eps_tools` followed by `python3 flash.py`. If a standalone
+copy cannot find the installed dependencies, use `PYTHONPATH=/data/openpilot`
+as an import-error workaround.
 `flash.py` is the recommended flasher; `eps-update.py` is the older manual
 alternative and the guided script's programming backend. `eps-diag.py` normally
 checks communication; use `--recovery` to request troubleshooting guidance.

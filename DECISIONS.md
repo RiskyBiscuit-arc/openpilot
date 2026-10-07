@@ -2231,3 +2231,13 @@ out of their folder. The root document source is retained here as
 `docs/eps_tools_repository_readme.md`, without replacing openpilot's own README.
 [CONFIRMED, static tree/link checks] All relative links resolve in the published
 tree. No runtime change, firmware addition, or hardware validation.
+
+## D-099 — Use plain python3 commands after entering eps_tools/
+
+**Decided 2026-10-06; owner correction.** README examples now run
+`python3 flash.py` after entering the installed tools directory; manual and
+diagnostic examples also omit PYTHONPATH prefixes. Rejected: requiring an
+environment prefix for normal fork use. PYTHONPATH remains only an optional
+import-error workaround for standalone copies. [CONFIRMED, static documentation
+review] Published standalone artifact `bc69fcf9800f243d0503eb14b375ca9b4f28548a`
+changes only Markdown docs. No runtime import behavior or hardware was tested.

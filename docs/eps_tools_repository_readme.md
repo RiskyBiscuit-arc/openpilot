@@ -14,7 +14,7 @@ Once your fork is installed on a comma, launch the recommended guided flasher:
 
 ```sh
 cd /data/openpilot/eps_tools
-PYTHONPATH=/data/openpilot python3 flash.py
+python3 flash.py
 ```
 
 The tools use `panda` and `opendbc` from your openpilot installation. Supply your

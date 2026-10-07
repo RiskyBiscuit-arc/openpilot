@@ -47,7 +47,7 @@ Once your fork is installed on a comma, the tools are at
 
 ```sh
 cd /data/openpilot/eps_tools
-PYTHONPATH=/data/openpilot python3 flash.py
+python3 flash.py
 ```
 
 ## Alternative: standalone copy on a comma
@@ -59,7 +59,7 @@ copy you want to keep across updates, use `/data/media/0/eps_tools/` instead:
 
 ```sh
 cd /data/media/0/eps_tools
-PYTHONPATH=/data/openpilot python3 flash.py
+python3 flash.py
 ```
 
 This alternative still uses the installed openpilot dependencies. The media
@@ -94,9 +94,9 @@ From your installed `eps_tools/` folder:
 
 ```sh
 # Dry run: stops before erase/programming.
-PYTHONPATH=/data/openpilot python3 eps-update.py rwd/YOUR_FIRMWARE.rwd -b 1
+python3 eps-update.py rwd/YOUR_FIRMWARE.rwd -b 1
 # Actual programming: explicit --danger is required.
-PYTHONPATH=/data/openpilot python3 eps-update.py rwd/YOUR_FIRMWARE.rwd -b 1 --danger
+python3 eps-update.py rwd/YOUR_FIRMWARE.rwd -b 1 --danger
 ```
 
 An expected dry-run stop is printed without a traceback. Bus 1 is the manual
@@ -116,11 +116,11 @@ python3 eps-update.py rwd/SOME_FIRMWARE.rwd -b 1 --skip-checksum --danger
 With ignition ON and openpilot stopped so the Panda is available:
 
 ```sh
-PYTHONPATH=/data/openpilot python3 eps-diag.py
+python3 eps-diag.py
 # Pin the bus/address if known:
-PYTHONPATH=/data/openpilot python3 eps-diag.py -b 1 --addr 0x18DA30F1
+python3 eps-diag.py -b 1 --addr 0x18DA30F1
 # Add troubleshooting guidance only when investigating a failed flash:
-PYTHONPATH=/data/openpilot python3 eps-diag.py -b 1 --recovery
+python3 eps-diag.py -b 1 --recovery
 ```
 
 Normal results are **communication confirmed**, **communication not confirmed**,

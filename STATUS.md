@@ -10923,3 +10923,12 @@ communication checks, firmware exclusion, and detailed usage/contribution links.
 Source retained as docs/eps_tools_repository_readme.md in this checkout. All
 relative links were verified against the published tree. Documentation only;
 no runtime tests or hardware checks needed or performed.
+
+## 233. EPS README command examples simplified (2026-10-06). D-099.
+
+[CONFIRMED, static documentation review] Standalone artifact
+`bc69fcf9800f243d0503eb14b375ca9b4f28548a` updates root, tools, firmware-folder,
+and contributor docs to use plain python3 commands from eps_tools/. PYTHONPATH
+is retained as an optional import-error workaround, not normal setup. Local
+root-document source matches publication. Documentation only; whitespace checks
+passed. No runtime tests or hardware validation were performed.
