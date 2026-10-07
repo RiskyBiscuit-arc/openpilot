@@ -400,6 +400,18 @@ STOCK_FEEL_JERK_OUTSIDE = 5.0  # m/s^3
 STOCK_FEEL_LEAD_STOP = True
 STOCK_FEEL_LEAD_STOP_A = -1.0  # m/s^2
 STOCK_FEEL_LEAD_STOP_GAP = 4.0  # m
+# Emergency bypass (owner 2026-10-07, 000002f5 at about 10:01; static only). A lead at 41 m braked at about -6.5 from
+# 18.5 m/s; the target ramped -0.35 -> -2.5 over 1.4 s at exactly the depth and jerk tables above while stopping behind
+# it needed -4.4, and the driver had to brake (car peaked -7.6, stopped 4.5 m short). Stock's law has no lead-braking
+# gate, so a hard-braking lead was met at stock's typical depth and rate. With this on, while any lead is closing and
+# either a closing lead brakes at STOCK_FEEL_EMERGENCY_A_LEAD or harder, or stopping behind a braking lead
+# (lead_stop_need) needs at least STOCK_FEEL_EMERGENCY_NEED and more than the table's depth, Stock Brake Feel steps aside:
+# the planner's own target passes through with no depth cap and no jerk limit. Once on it stays on until no lead is
+# closing, so the cap never comes back mid-brake. It never brakes harder than the planner without Stock Brake Feel.
+# On 2f5 it latches at 601.45 s (aLeadK -2.46), 1.4 s before the driver braked.
+STOCK_FEEL_EMERGENCY = True
+STOCK_FEEL_EMERGENCY_A_LEAD = -2.0  # m/s^2
+STOCK_FEEL_EMERGENCY_NEED = 2.0  # m/s^2
 # Stop ease (owner 2026-10-07, 000002f2, proposed; static only). Every hard stop on 2f2 reached standstill still braking
 # -1.6..-1.7 (longcontrol's stopping state only ever deepens, so it held -2.0/-2.27 through the stop): the clunk. With
 # this on, under STOP_EASE_BP[-1] the brake may go no deeper than STOP_EASE_V at that speed, easing to about -0.5 at
@@ -544,11 +556,32 @@ def lead_stop_need(leads, v_ego: float) -> float:
   return need
 
 
-def stock_feel_target(leads, prev: float, target: float, dt: float, v_ego: float = 0.0) -> float:
+def stock_feel_emergency(leads, v_ego: float, active: bool) -> bool:
+  """STOCK_FEEL_EMERGENCY latch: True while a lead is closing once a closing lead brakes at STOCK_FEEL_EMERGENCY_A_LEAD
+  or harder, or stopping behind a braking lead needs at least STOCK_FEEL_EMERGENCY_NEED and more than the table's depth."""
+  ttc = brake_onset_ttc(leads, STOCK_FEEL_MIN_CLOSING)
+  if not STOCK_FEEL_EMERGENCY or ttc == float('inf'):
+    return False
+  if active:
+    return True
+  for lead in leads:
+    if lead is not None and bool(getattr(lead, 'status', False)) and -float(lead.vRel) > STOCK_FEEL_MIN_CLOSING and \
+       float(lead.aLeadK) <= STOCK_FEEL_EMERGENCY_A_LEAD:
+      return True
+  need = lead_stop_need(leads, v_ego)
+  depth = float(np.interp(ttc, STOCK_FEEL_DEPTH_BP, STOCK_FEEL_DEPTH_V))
+  return need >= STOCK_FEEL_EMERGENCY_NEED and need > -depth
+
+
+def stock_feel_target(leads, prev: float, target: float, dt: float, v_ego: float = 0.0,
+                     emergency: bool = False) -> float:
   """D-086 stock Honda ACC brake law: while a lead is closing and the worst TTC is over STOCK_FEEL_TTC_FLOOR_S, the
   target goes no deeper than stock's depth at that TTC and deepens no faster than stock's rate; otherwise the planner's
   depth is kept and deepens at most STOCK_FEEL_JERK_OUTSIDE. STOCK_FEEL_LEAD_STOP: when stopping behind a braking lead
-  needs more than the table's depth, the cap is that need instead, deepening at STOCK_FEEL_JERK_OUTSIDE."""
+  needs more than the table's depth, the cap is that need instead, deepening at STOCK_FEEL_JERK_OUTSIDE. emergency
+  (stock_feel_emergency): the planner's target passes through untouched."""
+  if emergency:
+    return float(target)
   ttc = brake_onset_ttc(leads, STOCK_FEEL_MIN_CLOSING)
   if not ttc > STOCK_FEEL_TTC_FLOOR_S or ttc == float('inf'):
     return brake_onset_limited_target(prev, target, dt, STOCK_FEEL_JERK_OUTSIDE)
@@ -1580,6 +1613,7 @@ class LongitudinalPlanner:
     self.coast_ceiling = None
     self.lead_coast_active = LEAD_COAST_OFF
     self.lead_coast_ceiling = None
+    self.stock_feel_emergency = False
     self.fast_closing_lead_track = None
     self.fast_closing_tick = 0
     self.fast_closing_vision_seen = {}
@@ -4317,11 +4351,14 @@ class LongitudinalPlanner:
         leads = (self.lead_one, self.lead_two)
         if brake_onset_ttc(leads, STOCK_FEEL_MIN_CLOSING) == float('inf') and brake_onset_ttc(leads) > STOCK_FEEL_TTC_FLOOR_S:
           output_a_target = brake_onset_limited_target(prev_output_a_target, output_a_target, self.dt, LEAD_COAST_BRAKE_JERK)
+      self.stock_feel_emergency = stock_feel_emergency((self.lead_one, self.lead_two), scene_v_ego,
+                                                       self.stock_feel_emergency)
       output_a_target = stock_feel_target((self.lead_one, self.lead_two), prev_output_a_target, output_a_target, self.dt,
-                                          scene_v_ego)
+                                          scene_v_ego, self.stock_feel_emergency)
     else:
       self.lead_coast_active = LEAD_COAST_OFF
       self.lead_coast_ceiling = None
+      self.stock_feel_emergency = False
     if bool(getattr(starpilot_toggles, "stock_brake_feel", False)) and not reset_state and not bool(sm['carState'].standstill):
       d_lead = float(self.lead_one.dRel) if bool(getattr(self.lead_one, 'status', False)) else None
       output_a_target = stop_eased_target(prev_output_a_target, output_a_target, stop_ease_floor(scene_v_ego, d_lead), self.dt)
