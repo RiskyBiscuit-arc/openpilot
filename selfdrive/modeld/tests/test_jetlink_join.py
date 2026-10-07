@@ -119,3 +119,41 @@ def test_writes_reach_the_joining_model():
   joined.frame_drop_ratio = 0.25
   assert joining.in_control is False and joining.frame_drop_ratio == 0.25
   assert joined.handovers == 0
+
+
+def _bundle(ref, name, index, selector=19):
+  return {'ref': ref, 'display_name': name, 'index': index, 'minimum_selector_version': str(selector), 'is_big': True}
+
+
+def test_model_picker_lists_and_selects(monkeypatch):
+  from openpilot.common.params import Params
+  params = Params()
+  a, b, old = 'a' * 40, 'b' * 40, 'c' * 40
+  params.put(jetlink_adapter.KEYS.catalog, {'bundles': [_bundle(a, 'Older', 1), _bundle(b, 'Newer', 2), _bundle(old, 'Other runtime', 3, 14),
+                                                        {'ref': 'not-a-ref', 'index': 4, 'minimum_selector_version': '19'}]})
+  params.remove(jetlink_adapter.KEYS.big_model)
+  rows = jetlink_adapter.models()
+  assert [r['ref'] for r in rows] == [b, a] and [r['name'] for r in rows] == ['Newer', 'Older']
+  assert not any(r['selected'] for r in rows)
+
+  assert jetlink_adapter.select_model(a) is True
+  assert params.get(jetlink_adapter.KEYS.big_model) == {'ref': a, 'displayName': 'Older'}
+  assert [r['selected'] for r in jetlink_adapter.models()] == [False, True]
+  assert jetlink_adapter.select_model(old) is False   # not listed at this selector
+  assert jetlink_adapter.select_model(None) is True
+  assert params.get(jetlink_adapter.KEYS.big_model) is None
+
+
+def test_refresh_catalog_keeps_the_last_on_failure(monkeypatch):
+  from openpilot.common.params import Params
+  params = Params()
+  cached = {'bundles': [_bundle('d' * 40, 'Cached', 1)]}
+  params.put(jetlink_adapter.KEYS.catalog, cached)
+  monkeypatch.setattr(jetlink_adapter, 'should_extend_catalog', lambda: True)
+  monkeypatch.setattr(jetlink_adapter, 'extend_catalog', lambda catalog: catalog)   # a failed fetch keeps what it had
+  assert jetlink_adapter.refresh_catalog() is False and params.get(jetlink_adapter.KEYS.catalog) == cached
+  fresh = {'bundles': [*cached['bundles'], _bundle('e' * 40, 'Fresh', 2)]}
+  monkeypatch.setattr(jetlink_adapter, 'extend_catalog', lambda catalog: fresh)
+  assert jetlink_adapter.refresh_catalog() is True and params.get(jetlink_adapter.KEYS.catalog) == fresh
+  monkeypatch.setattr(jetlink_adapter, 'should_extend_catalog', lambda: False)   # a chestnut: StarPilot's own big models
+  assert jetlink_adapter.refresh_catalog() is False

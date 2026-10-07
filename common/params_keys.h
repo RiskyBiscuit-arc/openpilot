@@ -185,6 +185,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"JetlinkLink", {PERSISTENT, INT, "0"}},
     {"JetlinkSpec", {PERSISTENT, JSON}},
     {"JetlinkModelPointers", {PERSISTENT, JSON}},
+    // the big model jetlink runs, {ref, displayName}, picked in the Galaxy model
+    // manager (unset: jetlink's default), and the catalog it is picked from
+    {"JetlinkBigModel", {PERSISTENT, JSON}},
+    {"JetlinkCatalog", {PERSISTENT, JSON}},
     // an iPhone on a direct cable charges from the comma; off by default, some
     // lose the link once the comma powers them
     {"JetlinkChargePhone", {PERSISTENT, BOOL, "0"}},

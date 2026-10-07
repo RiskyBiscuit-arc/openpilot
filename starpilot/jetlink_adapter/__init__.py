@@ -4,8 +4,11 @@ needs, and the functions the hooks call. Ported from zoompilot's
 openpilot/sunnypilot/jetlink_adapter (develop, jetlink API 2; jetlink_repo
 pinned in jetlink_repo/VENDORED_FROM). Original copyright Zeph Leggett, MIT.
 
-Differences from zoompilot: no sunnypilot model manager (big_model/catalog keys
-unset, so jetlink runs its own default big model), no MADS (in_control reads
+Differences from zoompilot: no sunnypilot model manager. StarPilot's manifest
+names no comma commits, so jetlink keeps its own catalog (JetlinkCatalog,
+sunnypilot's big-model catalogs as jetlink fetches them, refreshed by
+StarPilot's model manager) and its own pick (JetlinkBigModel, set from the
+Galaxy model manager; unset runs jetlink's default big model). No MADS (in_control reads
 carControl), StarPilot's MODELS_PATH as the model root, and this fork's
 make_warp signature.
 
@@ -32,12 +35,11 @@ OWNER = 'jetlinkd'
 MODES = ('off', 'usb', 'ios')
 
 # the params jetlink reads and writes, all declared in params_keys.h. big_model
-# and catalog are the model manager's big-model slot and catalog
-# (models.helpers.ACTIVE_BUNDLE_KEYS['chestnut'] and ModelFetcher's cache): the
-# owner cannot import the model manager, so they are written out here
+# is the pick, {ref, displayName}, and catalog jetlink's catalog JSON, in the
+# shape sunnypilot's ModelFetcher caches ({bundles: [...]})
 _Keys = namedtuple('_Keys', 'link offroad progress spec pointers big_model catalog charge_phone')
 KEYS = _Keys(link='JetlinkLink', offroad='IsOffroad', progress='AcceleratorProgress', spec='JetlinkSpec',
-             pointers='JetlinkModelPointers', big_model=None, catalog=None,
+             pointers='JetlinkModelPointers', big_model='JetlinkBigModel', catalog='JetlinkCatalog',
              charge_phone='JetlinkChargePhone')
 
 # comma's chestnut, running and in its ROM (system.hardware.usb): the comma's
@@ -135,7 +137,9 @@ class Adapter:
       return None
 
   def put(self, key: str, value, *, block: bool = False) -> None:
-    self._params().put(key, value, block=block)
+    # this fork's Params.put has no block argument and always writes before
+    # it returns, which is what block=True asks for and never less than False
+    self._params().put(key, value)
 
   def remove(self, key: str) -> None:
     self._params().remove(key)
@@ -163,8 +167,11 @@ class Adapter:
     from openpilot.starpilot.common.starpilot_variables import MODELS_PATH
     return Path(MODELS_PATH)
 
-  # no sunnypilot model manager here
-  catalog_selector = 0
+  @property
+  def catalog_selector(self) -> int:
+    # the catalog is jetlink's own fetch, kept at the selector it merges to
+    from jetlink.registry.catalog import REQUIRED_SELECTOR_VERSION
+    return REQUIRED_SELECTOR_VERSION
 
   # -- modeld -----------------------------------------------------------------
 
@@ -412,3 +419,64 @@ def should_extend_catalog() -> bool:
 def extend_catalog(catalog: dict) -> dict:
   """The big-model catalog with those models folded in."""
   return _api().extend_catalog(catalog)
+
+
+# -- StarPilot's model manager and the Galaxy model picker -------------------
+
+@_guarded(False)
+def refresh_catalog() -> bool:
+  """The model manager's refresh: fetch the big-model catalogs and keep them in
+  KEYS.catalog. Network; a failed fetch keeps the last catalog (jetlink's
+  big_catalog never raises). Skipped with a chestnut fitted, which runs
+  StarPilot's own big models. True when the stored catalog changed."""
+  if not should_extend_catalog():
+    return False
+  store = adapter()
+  cached = store.get(KEYS.catalog)
+  cached = cached if isinstance(cached, dict) else {}
+  merged = extend_catalog(cached)
+  if not merged.get('bundles') or merged == cached:
+    return False
+  store.put(KEYS.catalog, merged, block=True)
+  return True
+
+
+@_guarded(list)
+def models() -> list[dict]:
+  """The picker's rows, newest first: {ref, name, state, selected}. state is
+  'ready' (built on the host), 'downloaded' (on the comma) or None. Records
+  only, no network."""
+  from jetlink.registry.catalog import REQUIRED_SELECTOR_VERSION, is_ref
+  store = adapter()
+  catalog = store.get(KEYS.catalog)
+  bundles = catalog.get('bundles', []) if isinstance(catalog, dict) else []
+  pick = store.get(KEYS.big_model)
+  picked = pick.get('ref') if isinstance(pick, dict) else None
+  rows = []
+  for b in sorted((b for b in bundles if isinstance(b, dict)), key=lambda b: int(b.get('index', 0) or 0), reverse=True):
+    ref = b.get('ref')
+    try:
+      selector = int(b.get('minimum_selector_version', 0))
+    except (TypeError, ValueError):
+      continue
+    if not is_ref(ref) or selector != REQUIRED_SELECTOR_VERSION or any(r['ref'] == ref for r in rows):
+      continue
+    state = getattr(_api(), 'model_state', lambda ref: None)(ref)
+    rows.append({'ref': ref, 'name': str(b.get('display_name') or ref[:10]), 'state': state, 'selected': ref == picked})
+  return rows
+
+
+@_guarded(False)
+def select_model(ref: str | None) -> bool:
+  """Pick the big model jetlink runs, by catalog ref; None or '' goes back to
+  jetlink's default. Offroad only: the caller checks. False for a ref the
+  catalog does not list."""
+  store = adapter()
+  if not ref:
+    store.remove(KEYS.big_model)
+    return True
+  row = next((r for r in models() if r['ref'] == ref), None)
+  if row is None:
+    return False
+  store.put(KEYS.big_model, {'ref': ref, 'displayName': row['name']}, block=True)
+  return True

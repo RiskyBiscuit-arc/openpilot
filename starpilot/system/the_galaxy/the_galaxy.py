@@ -7661,6 +7661,37 @@ def setup(app):
 
     return jsonify({"message": "Model manifest refreshed."}), 200
 
+  @app.route("/api/models/jetlink", methods=["GET", "PUT"])
+  def jetlink_models():
+    from openpilot.starpilot import jetlink_adapter
+
+    if request.method == "PUT":
+      if params.get_bool("IsOnroad"):
+        return jsonify({"error": "Cannot change the Jetlink model while driving."}), 403
+      data = request.get_json(silent=True)
+      if not isinstance(data, dict) or not isinstance(data.get("ref", ""), str):
+        return jsonify({"error": "A model ref string is required ('' for the default)."}), 400
+      ref = data.get("ref", "").strip()
+      if not jetlink_adapter.select_model(ref or None):
+        return jsonify({"error": f"Unknown Jetlink model '{ref}'."}), 404
+
+    status = jetlink_adapter.status()
+    return jsonify({
+      "available": status is not None,
+      "mode": status.mode if status else jetlink_adapter.MODES[0],
+      "enabled": bool(status and status.enabled),
+      "present": bool(status and status.present),
+      "transport": status.transport if status else "",
+      "ready": bool(status and status.ready),
+      "reason": status.reason if status else None,
+      "progress": status.progress if status else None,
+      "model": status.model if status else None,
+      "defaultModel": status.default_model if status else None,
+      "activeModel": status.active_model if status else None,
+      "models": jetlink_adapter.models(),
+      "isOnroad": params.get_bool("IsOnroad"),
+    }), 200
+
   @app.route("/api/models/download", methods=["POST"])
   def start_model_download():
     if params.get_bool("IsOnroad"):
