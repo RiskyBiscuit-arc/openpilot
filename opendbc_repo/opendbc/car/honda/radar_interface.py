@@ -70,64 +70,32 @@ BOSCH_A_FREQ_HZ = 14.35
 # (~9% low, -9 m at 60 m against vision).
 BOSCH_A_RANGE_SCALE_M = 1.0 / 16.0
 
-# Offset. The firmware term is -n/128, where n is assembled from a configuration word plus a
-# runtime addend and is therefore a PER-UNIT CALIBRATION VALUE, not a constant; 335 (-2.617 m) is
-# the factory fallback for Civic (36802TBA), and 341 (-2.664 m) is the factory fallback for CR-V (36802TLA).
-BOSCH_A_RANGE_OFFSET_FALLBACK_CIVIC_M = -335.0 / 128.0  # -2.6171875 m
-BOSCH_A_RANGE_OFFSET_FALLBACK_CRV_M = -341.0 / 128.0    # -2.6640625 m
-BOSCH_A_RANGE_OFFSET_FALLBACK_M = BOSCH_A_RANGE_OFFSET_FALLBACK_CIVIC_M
-BOSCH_A_RANGE_OFFSET_M = BOSCH_A_RANGE_OFFSET_FALLBACK_CIVIC_M
-BOSCH_A_RANGE_OFFSET_FALLBACK_PARAM = "BoschARangeOffsetFallback"
+# Offset: the radar firmware's ROM default n0, as -n0/128 m, per car (D-076, 2026-10-07, Peter).
+#
+#   Civic (36802TBA A160): cfg word 0 -> n0 = 335 (literal fallback) -> -2.6171875 m
+#   CR-V  (36802TLA A070): cfg 5448   -> n0 = trunc(5448/16 + 0.5) = 341 -> -2.6640625 m
+#
+# Evidence and its limits (static only, never road-measured):
+# - n0 is a ROM default. A unit may override cfg in NvM; Peter's radar is A150, whose image we do not have.
+# - The firmware adds a runtime addend from camera CAN 0x669 X (Peter's car: n = 220). That path, and the
+#   BoschARangeOffsetFallback toggle that applied it, are REMOVED: 0x669 was a required parser message
+#   (canError risk if absent), and the firmware never applies n/128 to a transmitted range. Range is copied
+#   unmodified (0xdb7ee -> rec+0x10); (range - n)/128 is only a lever arm for lateral (0xdc004) and the
+#   width gate (0xaa5a4).
+# - So this number is a firmware-sourced choice, not a proven range origin. It replaces -3.0 (James's fw
+#   math + tape check), moving dRel +0.38 m (Civic). The real origin of the camera's range vs openpilot's
+#   bumper-frame dRel needs a laser/tape check to a parked car (5/10/20/40/60 m).
+BOSCH_A_RANGE_OFFSET_CIVIC_M = -335.0 / 128.0  # -2.6171875 m
+BOSCH_A_RANGE_OFFSET_CRV_M = -341.0 / 128.0    # -2.6640625 m
+BOSCH_A_RANGE_OFFSET_M = BOSCH_A_RANGE_OFFSET_CIVIC_M
 
 
-def bosch_a_range_offset_fallback_m(car_fingerprint: str = "") -> float:
-  """Factory fallback range offset (-n_0 / 128.0):
-  - Civic (and others): -335 / 128.0 = -2.6171875 m
-  - CR-V:               -341 / 128.0 = -2.6640625 m
-  """
+def bosch_a_range_offset_m(car_fingerprint: str = "") -> float:
+  """Firmware ROM-default range offset for the car: CR-V -341/128, everything else (Civic) -335/128."""
   from opendbc.car.honda.values import CAR
   if car_fingerprint in (CAR.HONDA_CRV_5G, CAR.HONDA_CRV_HYBRID):
-    return BOSCH_A_RANGE_OFFSET_FALLBACK_CRV_M
-  return BOSCH_A_RANGE_OFFSET_FALLBACK_CIVIC_M
-
-
-def bosch_a_range_offset_m(fallback: bool = True, car_fingerprint: str = "") -> float:
-  """Factory fallback range offset for the given vehicle."""
-  return bosch_a_range_offset_fallback_m(car_fingerprint)
-
-
-def bosch_a_range_offset_fallback_enabled() -> bool:
-  """BoschARangeOffsetFallback: True enables dynamic ingestion of CAN 0x669 (1 Hz) camera mounting calibration.
-  False stays locked to the factory fallback (-2.617 m on Civic, -2.664 m on CR-V)."""
-  try:
-    from openpilot.common.params import Params
-    return bool(Params().get_bool(BOSCH_A_RANGE_OFFSET_FALLBACK_PARAM))
-  except Exception:
-    return False
-
-
-# Chassis mounting offset message broadcast from camera at 1 Hz on camera CAN (bus 2).
-# Firmware routine 0x13FBFA updates internal slots from COM signals 0x1da/0x1db/0x1dc.
-# Routine 0x11F3DC computes: addend = round((raw_x / 1024.0 - 1.5) * 128.0).
-# Net offset: n = n_0 + addend.
-# Base n_0 is 341 for CR-V (36802TLA cfg=5448 at 0x03047A) and 335 for Civic (36802TBA cfg=0) / fallback.
-BOSCH_A_CHASSIS_OFFSET_MSG = 0x669
-BOSCH_A_CHASSIS_OFFSET_FREQ_HZ = 1.0
-BOSCH_A_CHASSIS_OFFSET_RAW_INVALID = 0xFFF
-
-
-def bosch_a_addend_from_raw_x(raw_x: int) -> int:
-  """Convert 12-bit raw_x from CAN 0x669 (COM 0x1da) to signed Q7 addend counts per firmware 0x11F3DC."""
-  return int(round((raw_x / 1024.0 - 1.5) * 128.0))
-
-
-def bosch_a_base_n0(car_fingerprint: str) -> int:
-  """Base range offset count n_0 from firmware config word (0xDC004 / 0xD461C):
-  CR-V (TLA) has cfg = 5448 -> n_0 = 341 (2.664 m); Civic (TBA) and others default to 335 (2.617 m)."""
-  from opendbc.car.honda.values import CAR
-  if car_fingerprint in (CAR.HONDA_CRV_5G, CAR.HONDA_CRV_HYBRID):
-    return 341
-  return 335
+    return BOSCH_A_RANGE_OFFSET_CRV_M
+  return BOSCH_A_RANGE_OFFSET_CIVIC_M
 
 
 # Azimuth: f0 raw_angle (11-bit, B4:B5 high 3 bits), offset-binary about 1024.
@@ -197,7 +165,7 @@ BOSCH_A_DIRECT_VREL_CENTER_RAW = 864
 #     STATUS 7 src 2 U10<64, 55.7-70.0) bracket about 55-70 counts per m/s, which excludes 72; Job's per-dRel-band
 #     range check (D-074 second addendum) depends on the band, column A running 66.8-77.0, so the result is band-
 #     dependent rather than a clean exclusion. The encoder is firmware-proven 1/72 and the range scale is firmware-
-#     proven raw/16 (R18); the range offset (BOSCH_A_RANGE_OFFSET_M, -3.0) is a constant and does not change a range
+#     proven raw/16 (R18); the range offset (BOSCH_A_RANGE_OFFSET_M, -335/128 on Civic) is a constant and does not change a range
 #     slope. So this reads as a range-vs-U11 discrepancy (the range slope runs faster than U11), not a decode
 #     error. Unresolved; see STATUS. No closing-speed figure here is road-validated.
 # Centre 864, rails raw 0/1728, sentinel 0x7FE, u10, range and azimuth are unchanged. 1/72 publishes 64/72 of the
@@ -704,9 +672,7 @@ def _bosch_a_coast_vrel(track, rail_interval: bool, range_bound: bool = False, v
 
 
 def _create_bosch_a_can_parser(CP):
-  messages = [(addr, BOSCH_A_FREQ_HZ) for addr in BOSCH_A_ALL_IDS] + [
-    (BOSCH_A_CHASSIS_OFFSET_MSG, BOSCH_A_CHASSIS_OFFSET_FREQ_HZ),
-  ]
+  messages = [(addr, BOSCH_A_FREQ_HZ) for addr in BOSCH_A_ALL_IDS]
   # Bus.radar selects the Bosch-A DBC; the object/fusion feed itself is
   # physically on the camera-side ACC-CAN.
   return CANParser(DBC[CP.carFingerprint][Bus.radar], messages, CanBus(CP).camera)
@@ -736,12 +702,8 @@ class RadarInterface(RadarInterfaceBase):
       # D-074: U11 counts per m/s (72). An attribute so replays of 1/64-era logs can set it.
       self.u11_counts_per_mps = BOSCH_A_DIRECT_VREL_COUNTS_PER_MPS
       self.newborn_range_publish = BOSCH_A_NEWBORN_RANGE_PUBLISH
-      self.base_n0 = bosch_a_base_n0(CP.carFingerprint)
-      self.radar_addend: int | None = None
-      self.dynamic_offset_enabled = bosch_a_range_offset_fallback_enabled()
-      # Range offset: factory fallback (-2.617 m on Civic, -2.664 m on CR-V).
-      # If dynamic offset toggle is enabled and CAN 0x669 is received, range_offset_m updates to -(base_n0 + addend)/128.0.
-      self.range_offset_m = bosch_a_range_offset_fallback_m(CP.carFingerprint)
+      # D-076: firmware ROM-default range offset (-2.617 m Civic, -2.664 m CR-V). Fixed per car.
+      self.range_offset_m = bosch_a_range_offset_m(CP.carFingerprint)
     else:
       # Nidec
       self.rcp = _create_nidec_can_parser(CP.carFingerprint)
@@ -807,12 +769,6 @@ class RadarInterface(RadarInterfaceBase):
     ret = structs.RadarData()
     if not self.rcp.can_valid:
       ret.errors.canError = True
-
-    if self.dynamic_offset_enabled and BOSCH_A_CHASSIS_OFFSET_MSG in updated_messages:
-      raw_x = int(self.rcp.vl[BOSCH_A_CHASSIS_OFFSET_MSG]["RADAR_OFFSET_X_RAW"])
-      if raw_x != BOSCH_A_CHASSIS_OFFSET_RAW_INVALID and raw_x > 0:
-        self.radar_addend = bosch_a_addend_from_raw_x(raw_x)
-        self.range_offset_m = -(self.base_n0 + self.radar_addend) / 128.0
 
     now = self.rcp._last_update_nanos
     self._last_trigger_nanos = now
