@@ -14,6 +14,11 @@ TURN_PULSE_FRAMES = 50
 EXIT_PULSE_FRAMES = 75
 PULSE_TRIGGER_DISTANCE_M = 200.0
 
+# Hard-off, as in IQ.Pilot (IQP_NAV_TORQUE_INFLUENCE_ENABLED). Nothing calls this class yet either.
+# IQ.Pilot adds the pulse in latcontrol_torque before the controller's final negation, so the signs
+# below are only right at that point; added after the negation they would steer the wrong way.
+NAV_TORQUE_INFLUENCE_ENABLED = False
+
 
 class NavTorquePulse:
   def __init__(self, steer_max: float = 1.0):
@@ -43,6 +48,9 @@ class NavTorquePulse:
     return self._cached_state
 
   def _lookup_nav_pulse(self) -> tuple[str, float, int]:
+    if not NAV_TORQUE_INFLUENCE_ENABLED:
+      return "", 0.0, 0
+
     nav_state = self._update_nav_state()
     if not bool(nav_state.get("valid", False)):
       return "", 0.0, 0
@@ -57,16 +65,15 @@ class NavTorquePulse:
 
     maneuver_type = str(nav_state.get("maneuverType", "")).lower()
     modifier = str(nav_state.get("maneuverModifier", ""))
-    step_idx = str(nav_state.get("currentStepIndex", "0"))
 
-    # Left nudges negative in openpilot CAN steer torque, right nudges positive
+    # left nudges negative, otherwise positive (pre-negation, see NAV_TORQUE_INFLUENCE_ENABLED)
     def turn_pulse(direction_str: str) -> tuple[str, float, int]:
       sign = -TURN_NUDGE_TORQUE if "left" in direction_str.lower() else TURN_NUDGE_TORQUE
-      return f"turn:{step_idx}:{direction_str}", sign, TURN_PULSE_FRAMES
+      return f"turn:{direction_str}", sign, TURN_PULSE_FRAMES
 
     def exit_pulse(direction_str: str) -> tuple[str, float, int]:
       sign = -EXIT_NUDGE_TORQUE if "left" in direction_str.lower() else EXIT_NUDGE_TORQUE
-      return f"exit:{step_idx}:{direction_str}", sign, EXIT_PULSE_FRAMES
+      return f"exit:{direction_str}", sign, EXIT_PULSE_FRAMES
 
     if maneuver_type in ("off ramp", "fork", "exit") or "exit" in modifier.lower():
       return exit_pulse(modifier)
@@ -77,11 +84,18 @@ class NavTorquePulse:
     return "", 0.0, 0
 
   def nudge_output_torque(self, active: bool, carstate, output_torque: float) -> float:
-    if not active or getattr(carstate, "steeringPressed", False):
+    if not NAV_TORQUE_INFLUENCE_ENABLED:
       self._nav_pulse_frames = 0
+      self._nav_key = ""
       return output_torque
 
     nav_key, pulse_sign, pulse_frames = self._lookup_nav_pulse()
+
+    if not active or getattr(carstate, "steeringPressed", False):
+      self._nav_pulse_frames = 0
+      if not nav_key:
+        self._nav_key = ""
+      return output_torque
 
     if nav_key and nav_key != self._nav_key:
       self._nav_key = nav_key

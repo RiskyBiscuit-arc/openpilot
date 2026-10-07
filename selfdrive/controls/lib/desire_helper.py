@@ -68,6 +68,7 @@ class DesireHelper:
     self.lane_change_ll_prob = 1.0
     self.keep_pulse_timer = 0.0
     self.prev_one_blinker = False
+    self.prev_nav_exit_active = False
     self.desire = log.Desire.none
     self.nav_desire = log.Desire.none
 
@@ -279,29 +280,41 @@ class DesireHelper:
     if not bool(self._nav_instruction_state.get("valid", False)):
       return LaneChangeDirection.none
 
+    # As IQ.Pilot NavExitLaneChangeController: only a highway exit (Mapbox "off ramp") within
+    # NAV_EXIT_COMMIT_DISTANCE, in the maneuver's own direction
     maneuver_type = str(self._nav_instruction_state.get("maneuverType", "")).lower()
-    modifier = str(self._nav_instruction_state.get("maneuverModifier", ""))
+    if maneuver_type != "off ramp":
+      return LaneChangeDirection.none
+
+    # StarPilot-only: when navigationd has lane guidance for this exit, the existing keepLeft/keepRight
+    # lane positioning handles it, and a lane change state would block those desires
     active_lane_dir = str(self._nav_instruction_state.get("activeLaneDirection", ""))
-    should_send_lc = bool(self._nav_instruction_state.get("shouldSendLaneChangeDesire", False))
-    # If the vehicle already has active lane guidance for this ramp/fork, it uses in-lane keep positioning (keepLeft/keepRight).
-    if active_lane_dir in ("slightLeft", "left", "slightRight", "right") and not should_send_lc:
+    if active_lane_dir in ("slightLeft", "left", "sharpLeft", "slightRight", "right", "sharpRight"):
       return LaneChangeDirection.none
 
     try:
-      distance = float(self._nav_instruction_state.get("maneuverDistance", 9999.0))
+      distance = float(self._nav_instruction_state.get("maneuverDistance", 0.0))
     except (TypeError, ValueError):
       return LaneChangeDirection.none
+    if not 0.0 < distance <= NAV_EXIT_COMMIT_DISTANCE:
+      return LaneChangeDirection.none
 
-    is_exit_maneuver = (maneuver_type in ("off ramp", "fork", "exit") or "exit" in modifier.lower() or should_send_lc)
-    if is_exit_maneuver and 0.0 < distance <= NAV_EXIT_COMMIT_DISTANCE:
-      if modifier in ("left", "sharpLeft", "slightLeft") or active_lane_dir in ("left", "slightLeft"):
-        return LaneChangeDirection.left
-      elif modifier in ("right", "sharpRight", "slightRight") or active_lane_dir in ("right", "slightRight"):
-        return LaneChangeDirection.right
-
+    # route_engine falls back to the raw Mapbox step modifier ("slight right") when there is no banner
+    modifier = str(self._nav_instruction_state.get("maneuverModifier", "")).replace(" ", "").lower()
+    if modifier in ("left", "sharpleft", "slightleft"):
+      return LaneChangeDirection.left
+    elif modifier in ("right", "sharpright", "slightright"):
+      return LaneChangeDirection.right
     return LaneChangeDirection.none
 
   def _measured_yaw_rate(self, carstate) -> float:
+    # carState.yawRate is left unpopulated by many ports, so the model pose is the primary source
+    rate = getattr(getattr(getattr(self, "_last_modeldata", None), "orientationRate", None), "z", None)
+    try:
+      if rate is not None and len(rate) and math.isfinite(rate[0]):
+        return float(rate[0])
+    except (TypeError, IndexError):
+      pass
     try:
       return float(getattr(carstate, "yawRate", 0.0) or 0.0)
     except (TypeError, ValueError):
@@ -344,7 +357,8 @@ class DesireHelper:
   def get_lane_change_direction(CS):
     return LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right
 
-  def update(self, carstate, lateral_active, lane_change_prob, starpilotPlan, starpilot_toggles, controls_enabled=None):
+  def update(self, carstate, lateral_active, lane_change_prob, starpilotPlan, starpilot_toggles, controls_enabled=None, modeldata=None):
+    self._last_modeldata = modeldata
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < starpilot_toggles.minimum_lane_change_speed
@@ -357,9 +371,7 @@ class DesireHelper:
 
     lane_change_time_max = getattr(starpilot_toggles, 'lane_change_time_max', LANE_CHANGE_TIME_MAX)
     nav_exit_direction = self._get_nav_exit_lane_change_direction(starpilot_toggles)
-    nav_exit_enabled = getattr(starpilot_toggles, "nav_exit_lane_change", False) or \
-                       (getattr(starpilot_toggles, "nav_desires_allowed", self.nav_desires_allowed) and \
-                        getattr(starpilot_toggles, "nav_lane_positioning_allowed", self.nav_lane_positioning_allowed))
+    nav_exit_active = nav_exit_direction != LaneChangeDirection.none
 
     if not lateral_active or self.lane_change_timer > lane_change_time_max or not lane_changes_allowed:
       self.lane_change_state = LaneChangeState.off
@@ -374,7 +386,7 @@ class DesireHelper:
           self.nav_exit_lane_change = False
           # Initialize lane change direction to prevent UI alert flicker
           self.lane_change_direction = self.get_lane_change_direction(carstate)
-        elif not one_blinker and nav_exit_enabled and nav_exit_direction != LaneChangeDirection.none and not below_lane_change_speed and not self.lane_change_completed:
+        elif not one_blinker and nav_exit_active and not self.prev_nav_exit_active and not below_lane_change_speed:
           # Navigation requested exit lane change -> enter preLaneChange
           self.lane_change_state = LaneChangeState.preLaneChange
           self.lane_change_ll_prob = 1.0
@@ -391,6 +403,8 @@ class DesireHelper:
             self.lane_change_state = LaneChangeState.off
             self.lane_change_direction = LaneChangeDirection.none
             self.nav_exit_lane_change = False
+          else:
+            self.lane_change_direction = nav_exit_direction
 
         # Keep lane-change nudge sensitivity aligned with the old raw torque threshold,
         # even if steeringPressed is raised elsewhere for driver override filtering.
@@ -445,6 +459,11 @@ class DesireHelper:
           self.lane_change_direction = LaneChangeDirection.none
           if one_blinker:
             self.lane_change_state = LaneChangeState.preLaneChange
+          elif self.nav_exit_lane_change and nav_exit_active:
+            # an exit can need more than one lane; every further move needs a driver nudge again
+            self.lane_change_state = LaneChangeState.preLaneChange
+            self.lane_change_direction = nav_exit_direction
+            self.lane_change_completed = False
           else:
             self.lane_change_state = LaneChangeState.off
             self.nav_exit_lane_change = False
@@ -455,6 +474,7 @@ class DesireHelper:
       self.lane_change_timer += DT_MDL
 
     self.prev_one_blinker = one_blinker
+    self.prev_nav_exit_active = nav_exit_active
 
     if lateral_active and one_blinker and below_lane_change_speed and not carstate.standstill and starpilot_toggles.use_turn_desires:
       self.turn_direction = TurnDirection.turnLeft if carstate.leftBlinker else TurnDirection.turnRight
@@ -482,5 +502,5 @@ class DesireHelper:
     if nav_desire != log.Desire.none and self.lane_change_state == LaneChangeState.off:
       self.desire = nav_desire
 
-    if self.desire in (log.Desire.turnLeft, log.Desire.turnRight):
-      self.desire = self._pulse_turn_desire(self.desire, carstate)
+    # Runs every frame, as in IQ.Pilot: a non-turn desire is what clears the pulse/recoil state
+    self.desire = self._pulse_turn_desire(self.desire, carstate)

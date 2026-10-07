@@ -52,8 +52,6 @@ NAV_TURN_TARGET_SPEEDS = {
   "sharpRight": 10.0 * CV.MPH_TO_MS,
   "left": 14.0 * CV.MPH_TO_MS,
   "right": 14.0 * CV.MPH_TO_MS,
-  "slightLeft": 18.0 * CV.MPH_TO_MS,
-  "slightRight": 18.0 * CV.MPH_TO_MS,
 }
 
 # Force-stop kinematic profile. The user tunes one signed knob (ForceStopDistanceOffset,
@@ -391,13 +389,10 @@ class StarPilotVCruise:
     if "roundabout" in maneuver_type or "rotary" in maneuver_type:
       return 12.0 * CV.MPH_TO_MS
 
-    if maneuver_type in ("off ramp", "exit", "fork") or "exit" in maneuver_modifier.lower():
-      return 20.0 * CV.MPH_TO_MS
-
-    if maneuver_type == "turn" or not maneuver_type:
+    if maneuver_type == "turn":
       return NAV_TURN_TARGET_SPEEDS.get(maneuver_modifier)
 
-    return NAV_TURN_TARGET_SPEEDS.get(maneuver_modifier)
+    return None
 
   @staticmethod
   def _nav_target_for_distance(target_speed, maneuver_distance):

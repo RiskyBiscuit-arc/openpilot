@@ -115,6 +115,8 @@ class CarNavigationLayout(StarPilotNavigationLayout):
     self._search_due: float | None = None
 
   def show_event(self):
+    # Galaxy may have changed the shared preferences while this page was hidden.
+    self._route_prefs = load_route_preferences(self._params)
     self._clear_route_preview()
     self._live_query = ""
     self._search_due = None
@@ -256,6 +258,8 @@ class CarNavigationLayout(StarPilotNavigationLayout):
       }
       if key in pref_map:
         attr = pref_map[key]
+        # Toggle against freshly loaded preferences so a change made in Galaxy isn't overwritten.
+        self._route_prefs = load_route_preferences(self._params)
         self._route_prefs[attr] = not self._route_prefs.get(attr, False)
         save_route_preferences(self._route_prefs, self._params)
         if self._draft_destination is not None:

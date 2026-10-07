@@ -9,7 +9,8 @@ import {
   removeRouteFromMap,
   getOrdinalSuffix,
   highlightRoute,
-} from "./navigation_utilities.js?v=nav-search-context-2";
+  rankEcoRoutes,
+} from "./navigation_utilities.js?v=nav-route-prefs-1";
 import { Modal } from "/assets/components/modal.js";
 
 function sha1hex(str) {
@@ -301,30 +302,6 @@ export function NavDestination() {
     await setSpecial(favorite, "work", state, loadFavoritesAlphabetically);
   }
 
-function rankEcoRoutes(routes) {
-  if (!routes || routes.length <= 1) return routes;
-  const scored = routes.map((r, i) => {
-    const dist = Number(r.distance) || 0;
-    const dur = Math.max(1, Number(r.duration) || 1);
-    const avgSpeed = dist / dur;
-    const aeroExcess = Math.max(0, avgSpeed - 15.0);
-    const aeroFactor = 1.0 + (aeroExcess / 25.0) ** 2 * 0.5;
-    const cost = dist * aeroFactor;
-    return { route: r, cost, origIndex: i };
-  });
-  const minCost = Math.min(...scored.map(s => s.cost));
-  const maxCost = Math.max(...scored.map(s => s.cost));
-  scored.sort((a, b) => a.cost - b.cost);
-  return scored.map((s, idx) => {
-    const savingsPct = s.cost > minCost ? 0 : Math.max(0, ((maxCost - s.cost) / (maxCost || 1)) * 100);
-    return {
-      ...s.route,
-      isEco: idx === 0,
-      ecoSavingsPct: Math.round(savingsPct),
-    };
-  });
-}
-
   async function toggleRoutePreference(key) {
     state.routePreferences[key] = !state.routePreferences[key];
     fetch("/api/navigation/preferences", {
@@ -392,6 +369,8 @@ function rankEcoRoutes(routes) {
           startingCoordinates: [state.lastPosition.longitude, state.lastPosition.latitude],
           routeId: selectedRouteId,
           routeHash,
+          isEco: Boolean(selectedRouteData.isEco),
+          ecoSavingsPct: Number(selectedRouteData.ecoSavingsPct) || 0,
           steps: selectedRouteData?.legs?.[0]?.steps || []
         };
 
@@ -411,6 +390,8 @@ function rankEcoRoutes(routes) {
               duration: route.duration,
               distance: route.distance,
               routeId,
+              isEco: Boolean(route?.isEco),
+              ecoSavingsPct: Number(route?.ecoSavingsPct) || 0,
               steps: route?.legs?.[0]?.steps || []
             };
             highlightRoute(map, routes, routeId);
@@ -897,6 +878,7 @@ function rankEcoRoutes(routes) {
                 },
                 loadFavorites: loadFavoritesAlphabetically,
                 removeFavorite: confirmRemoveFavorite,
+                toggleRoutePreference,
                 searchFieldState,
                 favoriteRoutes: state.favoriteRoutes
               }, state.confirmedRouteRefresh);
@@ -988,8 +970,11 @@ function NavigationDestination({
   onConfirm,
   loadFavorites,
   removeFavorite,
+  toggleRoutePreference,
   searchFieldState,
   isFavorited,
+  isEco = false,
+  ecoSavingsPct = 0,
   favoriteRoutes = [],
   steps = []
   }) {
@@ -1111,17 +1096,24 @@ function NavigationDestination({
         <span class="label">ETA:</span>
         <span class="value">${etaString}</span>
       </div>
+      ${isEco ? html`
+        <div class="summary-row">
+          <span class="emoji">🌿</span>
+          <span class="label">Eco Route</span>
+          <span class="value">${ecoSavingsPct > 0 ? `Saves ${ecoSavingsPct}% fuel` : "Most fuel-efficient"}</span>
+        </div>
+      ` : ""}
       <div class="navigation-preferences">
-        <button type="button" class="navigation-pref-pill ${() => state.routePreferences.avoid_tolls ? 'active' : ''}" @click="${() => toggleRoutePreference('avoid_tolls')}">
+        <button type="button" class="${() => "navigation-pref-pill" + (state.routePreferences.avoid_tolls ? " active" : "")}" @click="${() => toggleRoutePreference('avoid_tolls')}">
           <i class="bi bi-slash-circle"></i> Avoid Tolls
         </button>
-        <button type="button" class="navigation-pref-pill ${() => state.routePreferences.avoid_highways ? 'active' : ''}" @click="${() => toggleRoutePreference('avoid_highways')}">
+        <button type="button" class="${() => "navigation-pref-pill" + (state.routePreferences.avoid_highways ? " active" : "")}" @click="${() => toggleRoutePreference('avoid_highways')}">
           <i class="bi bi-sign-stop"></i> Avoid Highways
         </button>
-        <button type="button" class="navigation-pref-pill ${() => state.routePreferences.avoid_ferries ? 'active' : ''}" @click="${() => toggleRoutePreference('avoid_ferries')}">
+        <button type="button" class="${() => "navigation-pref-pill" + (state.routePreferences.avoid_ferries ? " active" : "")}" @click="${() => toggleRoutePreference('avoid_ferries')}">
           <i class="bi bi-water"></i> Avoid Ferries
         </button>
-        <button type="button" class="navigation-pref-pill ${() => state.routePreferences.prefer_eco ? 'active' : ''}" @click="${() => toggleRoutePreference('prefer_eco')}">
+        <button type="button" class="${() => "navigation-pref-pill" + (state.routePreferences.prefer_eco ? " active" : "")}" @click="${() => toggleRoutePreference('prefer_eco')}">
           <i class="bi bi-tree"></i> 🌿 Fuel-Efficient
         </button>
       </div>

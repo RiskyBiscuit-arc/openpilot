@@ -1,4 +1,4 @@
-export const LAYOUT_URL = "/assets/components/tools/device_settings_layout.json?v=settings-tier-1"
+export const LAYOUT_URL = "/assets/components/tools/device_settings_layout.json?v=nav-route-prefs-1"
 
 async function parse(res) {
   const data = await res.json().catch(() => ({}))
@@ -247,7 +247,7 @@ export const api = {
   mapboxDirections(from, to, accessToken, options = {}) {
     const origin = `${from.longitude},${from.latitude}`
     const destination = `${to.longitude},${to.latitude}`
-    const query = { geometries: "geojson", annotations: "congestion", overview: "full", alternatives: "true", access_token: accessToken }
+    const query = { geometries: "geojson", annotations: "congestion", overview: "full", alternatives: "true", steps: "true", access_token: accessToken }
     if (options?.exclude) query.exclude = options.exclude
     const params = new URLSearchParams(query)
     return request(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${origin};${destination}?${params.toString()}`, { cache: "no-store" })

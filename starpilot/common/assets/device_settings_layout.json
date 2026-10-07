@@ -284,22 +284,23 @@
       },
       {
         "key": "NavDesiresAllowed",
-        "label": "Use Route Desires for Turns",
-        "description": "Allow an active navigation route to request low-speed turn desires.",
-        "picker_description": "Allows navigation to request low-speed turns.",
+        "label": "Use Route Desires",
+        "description": "Allow navigation to request lane keep and turns.",
+        "picker_description": "Allows navigation to request lane keep and turns.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "LateralTune",
+        "is_parent_toggle": true,
         "settings_tier": "advanced"
       },
       {
         "key": "NavLanePositioningAllowed",
-        "label": "Use Route Desires for Lane Positioning",
-        "description": "Allow route lane bias only after steering torque confirms the requested direction. It never initiates a lane change by itself.",
-        "picker_description": "Uses route-based lane positioning after torque confirmation.",
+        "label": "Route Lane Positioning",
+        "description": "Allow navigation to position in lane and request highway exit lane changes (nudge confirmed).",
+        "picker_description": "Lets navigation position in lane and request nudge-confirmed exit lane changes.",
         "data_type": "bool",
         "ui_type": "toggle",
-        "parent_key": "LateralTune",
+        "parent_key": "NavDesiresAllowed",
         "settings_tier": "advanced"
       },
       {

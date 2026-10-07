@@ -425,7 +425,9 @@ class MapboxRouteEngine:
   def fetch_route(self, token: str, start: Coordinate, destination: dict[str, Any], bearing: float | None = None) -> NavigationRoute | None:
     route_id = str(destination.get("routeId") or "main")
     requested_route_index = int(route_id[4:]) if route_id.startswith("alt-") and route_id[4:].isdigit() else 0
-    routes = self.fetch_routes(token, start, destination, bearing, alternatives=requested_route_index > 0)
+    # prefer_eco may promote an alternative to index 0, so "main" needs the alternatives too.
+    routes = self.fetch_routes(token, start, destination, bearing,
+                               alternatives=requested_route_index > 0 or bool(destination.get("prefer_eco", False)))
     if not routes:
       return None
     return routes[requested_route_index] if requested_route_index < len(routes) else routes[0]
@@ -492,11 +494,11 @@ class MapboxRouteEngine:
       routes[best_eco_idx].is_eco_recommended = True
       routes[best_eco_idx].eco_savings_pct = savings
 
-      route_id = str(destination.get("routeId") or "")
-      if not (route_id.startswith("alt-") and route_id[4:].isdigit()):
-        if best_eco_idx != 0:
-          eco_route = routes.pop(best_eco_idx)
-          routes.insert(0, eco_route)
+      # Always reorder (for "main" and "alt-N" alike) so "alt-N" indexes the same list that the
+      # Galaxy and device previews show: best eco route first, the rest in Mapbox order.
+      if best_eco_idx != 0:
+        eco_route = routes.pop(best_eco_idx)
+        routes.insert(0, eco_route)
 
     return routes
 

@@ -296,3 +296,42 @@ def test_fetch_routes_prefer_eco_ranks_fuel_efficient_route_first():
   assert routes_eco[0].is_eco_recommended is True
   assert routes_eco[0].eco_savings_pct > 0.0
 
+
+
+def single_step_route(distance: float, duration: float) -> dict:
+  return {
+    "distance": distance,
+    "duration": duration,
+    "geometry": {"coordinates": [[0.0, 0.0], [0.1, 0.0]]},
+    "legs": [{
+      "steps": [
+        {"maneuver": {"type": "depart", "instruction": "Go", "location": [0.0, 0.0]}, "distance": distance, "duration": duration},
+        {"maneuver": {"type": "arrive", "instruction": "Arrive", "location": [0.1, 0.0]}, "distance": 0.0, "duration": 0.0},
+      ],
+    }],
+  }
+
+
+def test_fetch_route_prefer_eco_main_requests_alternatives():
+  # "main" with prefer_eco must see the alternatives, or it cannot pick the eco route the previews showed.
+  session = DirectionsSession({"code": "Ok", "routes": [single_step_route(24140.0, 900.0), single_step_route(16093.0, 960.0)]})
+  engine = MapboxRouteEngine(session)
+  route = engine.fetch_route("token", Coordinate(0.0, 0.0), {"latitude": 0.0, "longitude": 0.1, "routeId": "main", "prefer_eco": True})
+  assert session.params["alternatives"] == "true"
+  assert route.total_distance == 16093.0
+  assert route.is_eco_recommended is True
+
+
+def test_fetch_route_prefer_eco_alt_indexes_reordered_list():
+  # Mapbox order [A highway, B longer highway, C local]; C is the eco pick, so the list shown is [C, A, B].
+  routes = [single_step_route(24140.0, 900.0), single_step_route(30000.0, 1100.0), single_step_route(16093.0, 960.0)]
+  session = DirectionsSession({"code": "Ok", "routes": routes})
+  engine = MapboxRouteEngine(session)
+  destination = {"latitude": 0.0, "longitude": 0.1, "prefer_eco": True}
+  shown = engine.fetch_routes("token", Coordinate(0.0, 0.0), destination)
+  assert [r.total_distance for r in shown] == [16093.0, 24140.0, 30000.0]
+  for index, expected in ((0, 16093.0), (1, 24140.0), (2, 30000.0)):
+    route_id = "main" if index == 0 else f"alt-{index}"
+    picked = engine.fetch_route("token", Coordinate(0.0, 0.0), {**destination, "routeId": route_id})
+    assert picked.total_distance == expected
+    assert session.params["alternatives"] == "true"

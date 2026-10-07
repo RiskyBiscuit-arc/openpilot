@@ -8,7 +8,8 @@ import {
   formatSecondsToHuman,
   formatMetersToHuman,
   formatMetersToMiles,
-} from "../../../components/navigation/navigation_utilities.js?v=nav-route-selection-1"
+  rankEcoRoutes,
+} from "../../../components/navigation/navigation_utilities.js?v=nav-route-prefs-1"
 
 const MAPBOX_STYLE = "mapbox://styles/frogsgomoo/cmcfv151j000o01rcdxebhl76"
 
@@ -394,32 +395,25 @@ export const NavigationDestinationPanel = {
       }
       if (this.map && this.routes.length) highlightRoute(this.map, this.routes, routeId)
     },
-    rankEcoRoutes(routes) {
-      if (!routes || routes.length <= 1) return routes
-      const scored = routes.map((r, i) => {
-        const dist = Number(r.distance) || 0
-        const dur = Math.max(1, Number(r.duration) || 1)
-        const avgSpeed = dist / dur
-        const aeroExcess = Math.max(0, avgSpeed - 15.0)
-        const aeroFactor = 1.0 + (aeroExcess / 25.0) ** 2 * 0.5
-        const cost = dist * aeroFactor
-        return { route: r, cost, origIndex: i }
-      })
-      const minCost = Math.min(...scored.map(s => s.cost))
-      const maxCost = Math.max(...scored.map(s => s.cost))
-      scored.sort((a, b) => a.cost - b.cost)
-      return scored.map((s, idx) => {
-        const savingsPct = s.cost > minCost ? 0 : Math.max(0, ((maxCost - s.cost) / (maxCost || 1)) * 100)
-        return {
-          ...s.route,
-          isEco: idx === 0,
-          ecoSavingsPct: Math.round(savingsPct),
-        }
-      })
-    },
     async togglePreference(key) {
       this.routePreferences[key] = !this.routePreferences[key]
-      api.setNavigationPreferences(this.routePreferences).catch(() => {})
+      await api.setNavigationPreferences(this.routePreferences).catch(() => {})
+      if (this.navigationStarted && this.destination) {
+        // The car is already routing: re-send the active destination with the new preferences
+        // (same call as setDestination) so the comma re-routes, not just the preview.
+        this.destination = {
+          ...this.destination,
+          avoid_tolls: Boolean(this.routePreferences?.avoid_tolls),
+          avoid_highways: Boolean(this.routePreferences?.avoid_highways),
+          avoid_ferries: Boolean(this.routePreferences?.avoid_ferries),
+          prefer_eco: Boolean(this.routePreferences?.prefer_eco),
+        }
+        try {
+          await api.setNavigation(this.destination)
+        } catch (e) {
+          showSnackbar(e?.message || "Could not update the active route.", "error")
+        }
+      }
       if (this.destination) {
         await this.previewDestination(this.destination)
       }
@@ -445,7 +439,7 @@ export const NavigationDestinationPanel = {
         const payload = await api.mapboxDirections(this.lastPosition, place, this.mapboxPublic, options)
         let routes = Array.isArray(payload?.routes) ? payload.routes : []
         if (routes.length && this.routePreferences.prefer_eco) {
-          routes = this.rankEcoRoutes(routes)
+          routes = rankEcoRoutes(routes)
         }
         if (routes.length) {
           const requestedRouteId = preferredRouteId || place.routeId || this.selectedRouteId || "main"

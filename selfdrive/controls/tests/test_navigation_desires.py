@@ -683,3 +683,46 @@ def test_turn_desire_heading_recoil_clears_desire():
 
   # Desire must recoil to none so the car does not overshoot past apex
   assert helper.desire == log.Desire.none
+
+
+def test_turn_desire_pulse_resets_between_turns():
+  # IQ.Pilot runs the pulse every frame; a non-turn frame must clear the recoil so the next turn fires
+  helper = DesireHelper()
+  toggles = make_toggles(use_turn_desires=True)
+  turning = make_car_state(vEgo=5.0, leftBlinker=True, yawRate=0.3)
+  for _ in range(80):
+    helper.update(turning, True, 0.0, make_plan(), toggles)
+  assert helper.desire == log.Desire.none
+  for _ in range(20):
+    helper.update(make_car_state(vEgo=5.0, yawRate=0.0), True, 0.0, make_plan(), toggles)
+  helper.update(turning, True, 0.0, make_plan(), toggles)
+  assert helper.desire == log.Desire.turnLeft
+
+
+def test_turn_recoil_prefers_model_yaw_rate():
+  helper = DesireHelper()
+  helper._last_modeldata = SimpleNamespace(orientationRate=SimpleNamespace(z=[0.7]))
+  assert helper._measured_yaw_rate(SimpleNamespace(yawRate=0.1)) == 0.7
+  helper._last_modeldata = None
+  assert helper._measured_yaw_rate(SimpleNamespace(yawRate=0.1)) == 0.1
+
+
+def test_nav_exit_lane_change_only_on_rising_edge():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {"valid": True, "maneuverType": "off ramp", "maneuverModifier": "slight right", "maneuverDistance": 400.0}
+  toggles = make_toggles(nav_exit_lane_change=True, nudgeless=False)
+  helper.update(make_car_state(vEgo=25.0), True, 0.0, make_plan(), toggles)
+  assert helper.lane_change_state == LaneChangeState.preLaneChange
+  helper.update(make_car_state(vEgo=25.0), False, 0.0, make_plan(), toggles)
+  for _ in range(5):
+    helper.update(make_car_state(vEgo=25.0), True, 0.0, make_plan(), toggles)
+  assert helper.lane_change_state == LaneChangeState.off
+
+
+def test_nav_exit_lane_change_ignores_forks():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {"valid": True, "maneuverType": "fork", "maneuverModifier": "slightRight", "maneuverDistance": 400.0}
+  helper.update(make_car_state(vEgo=25.0), True, 0.0, make_plan(), make_toggles(nav_exit_lane_change=True))
+  assert helper.lane_change_state == LaneChangeState.off

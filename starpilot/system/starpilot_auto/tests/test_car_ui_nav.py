@@ -978,8 +978,12 @@ def test_next_orientation_flips():
 
 def test_car_navigation_route_preferences_toggling_updates_state_and_triggers_preview(monkeypatch, tmp_path):
   from openpilot.starpilot.system.starpilot_auto.ui import navigation
+  # The page reloads the shared preference store before each toggle, so back it with memory here.
+  store = {"avoid_tolls": False, "avoid_highways": False, "avoid_ferries": False, "prefer_eco": False}
+  monkeypatch.setattr(navigation, "load_route_preferences", lambda params=None: dict(store))
+  monkeypatch.setattr(navigation, "save_route_preferences", lambda prefs, params=None: store.update(prefs))
   page = navigation.CarNavigationLayout.__new__(navigation.CarNavigationLayout)
-  page._route_prefs = {"avoid_tolls": False, "avoid_highways": False, "avoid_ferries": False, "prefer_eco": False}
+  page._route_prefs = dict(store)
   page._params = None
   page._draft_destination = {"latitude": 37.77, "longitude": -122.41, "name": "San Francisco"}
   page._preview_routes = []
@@ -1012,4 +1016,10 @@ def test_car_navigation_route_preferences_toggling_updates_state_and_triggers_pr
   assert page._route_prefs["prefer_eco"] is True
   assert page._draft_destination["prefer_eco"] is True
   assert len(previews) == 4
+
+  # A change saved by Galaxy meanwhile (tolls turned back off) survives the next device toggle.
+  store["avoid_tolls"] = False
+  page._activate_navigation_target("action:pref:eco")
+  assert store == {"avoid_tolls": False, "avoid_highways": True, "avoid_ferries": True, "prefer_eco": False}
+  assert page._route_prefs == store
 

@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import openpilot.starpilot.controls.lib.nav_torque_pulse as ntp
 from openpilot.starpilot.controls.lib.nav_torque_pulse import NavTorquePulse
 
 
@@ -12,13 +13,20 @@ def test_nav_torque_pulse_inactive():
   assert out == 0.2
 
 
-def test_nav_torque_pulse_triggers_on_turn_approach():
+def test_nav_torque_pulse_hard_off_by_default():
+  assert ntp.NAV_TORQUE_INFLUENCE_ENABLED is False
+  pulse = NavTorquePulse(steer_max=1.0)
+  pulse.params_memory.put("NavInstructionState", {"valid": True, "maneuverModifier": "left", "maneuverDistance": 150.0})
+  assert pulse.nudge_output_torque(True, make_cs(), 0.0) == 0.0
+
+
+def test_nav_torque_pulse_triggers_on_turn_approach(monkeypatch):
+  monkeypatch.setattr(ntp, "NAV_TORQUE_INFLUENCE_ENABLED", True)
   pulse = NavTorquePulse(steer_max=1.0)
   pulse.params_memory.put("NavInstructionState", {
     "valid": True,
     "maneuverModifier": "left",
     "maneuverDistance": 150.0,
-    "currentStepIndex": "1",
   })
 
   # Active and within 200m -> nudges left (negative torque)
