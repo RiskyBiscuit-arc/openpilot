@@ -397,7 +397,7 @@ STOCK_FEEL_JERK_OUTSIDE = 5.0  # m/s^3
 # (STOCK_FEEL_LEAD_STOP_GAP short of it) needs more than the table's depth, the cap moves to that need (never below the
 # vehicle minimum; the planner's own target still applies when shallower) and deepens at STOCK_FEEL_JERK_OUTSIDE, as
 # below the TTC floor. A steady slow lead never stops, so it is untouched.
-STOCK_FEEL_LEAD_STOP = False
+STOCK_FEEL_LEAD_STOP = True
 STOCK_FEEL_LEAD_STOP_A = -1.0  # m/s^2
 STOCK_FEEL_LEAD_STOP_GAP = 4.0  # m
 # Stop ease (owner 2026-10-07, 000002f2, proposed; static only). Every hard stop on 2f2 reached standstill still braking
@@ -406,7 +406,7 @@ STOCK_FEEL_LEAD_STOP_GAP = 4.0  # m
 # the stop, both in the planner target and in longcontrol's stopping state while still rolling, rising at most
 # STOP_EASE_JERK. Only when the eased stop still ends STOP_EASE_MIN_GAP short of the lead (no lead: always); it adds
 # about 0.5 m from 3 m/s against a constant -2.3.
-STOP_EASE = False
+STOP_EASE = True
 STOP_EASE_BP = [0.0, 1.0, 3.0]  # m/s
 STOP_EASE_V = [-0.5, -1.1, -2.5]  # m/s^2
 STOP_EASE_JERK = 2.0  # m/s^3

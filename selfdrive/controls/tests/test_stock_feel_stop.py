@@ -20,9 +20,8 @@ def ease_on(monkeypatch):
   monkeypatch.setattr(lp, 'STOP_EASE', True)
 
 
-def test_off_by_default():
-  assert not lp.STOCK_FEEL_LEAD_STOP and not lp.STOP_EASE
-  assert lp.stop_ease_floor(1.0, None) is None
+def test_variant_switches():
+  assert lp.STOCK_FEEL_LEAD_STOP is True and lp.STOP_EASE is True
 
 
 def test_braking_lead_keeps_planner_depth(lead_stop_on):
