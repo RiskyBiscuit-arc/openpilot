@@ -551,9 +551,9 @@ def test_lane_between_lines_spans_inner_to_outer_line():
   renderer = _tint_renderer()
   import numpy as np
   poly = renderer._lane_between_lines(1, 0, np.linspace(0.0, 100.0, 11, dtype=np.float32))
-  assert poly.shape[0] == 22
-  assert set(np.round(poly[:11, 0])) == {500 - 18}   # inner line y=-1.8
-  assert set(np.round(poly[11:, 0])) == {500 - 54}   # outer line y=-5.4
+  assert poly.shape[0] == 20   # the x=0 point is behind the camera
+  assert set(np.round(poly[:10, 0])) == {500 - 54}   # left edge first (outer line y=-5.4)
+  assert set(np.round(poly[10:, 0])) == {500 - 18}   # then the inner line back
 
 
 def test_lane_between_lines_empty_without_lines():
@@ -574,3 +574,16 @@ def test_adjacent_lane_tint_draws_only_the_occupied_side(monkeypatch):
   renderer._draw_adjacent_lane_tint()
   assert len(drawn) == 1
   assert (drawn[0].r, drawn[0].g, drawn[0].b, drawn[0].a) == (180, 0, 255, mr.ADJACENT_LANE_TINT_ALPHA)
+
+
+def test_blindspot_lane_is_red_and_wins_over_the_lead_tint(monkeypatch):
+  import numpy as np
+  renderer = _tint_renderer()
+  renderer._rect = mr.rl.Rectangle(0, 0, 100, 100)
+  renderer._path = SimpleNamespace(raw_points=np.stack([np.linspace(0.0, 100.0, 11)] * 3, axis=1).astype(np.float32))
+  quad = np.array([[0, 0], [10, 0], [10, 10], [0, 10]], dtype=np.float32)
+  renderer._adjacent_lane_polygons = [quad, quad]
+  drawn = []
+  monkeypatch.setattr(mr, "draw_polygon", lambda rect, pts, color=None, **kw: drawn.append((color.r, color.g, color.b)))
+  renderer._draw_adjacent_lane_tint((True, False))
+  assert drawn == [(255, 0, 0), (180, 0, 255)]

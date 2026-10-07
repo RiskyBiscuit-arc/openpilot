@@ -15,6 +15,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.rainbow_path import RainbowPath
 from openpilot.selfdrive.ui.lib.starpilot_visuals import LeadInfoMode, blend_colors, lead_indicator_enabled, lead_info_mode, multi_lead_ui_enabled
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.selfdrive.ui.mici.onroad.starpilot_status import get_border_color
+from openpilot.starpilot.common.vision_bsm import get_fresh_vasm_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.shader_polygon import draw_polygon, Gradient
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -90,6 +91,7 @@ class ModelPoints:
 LEAD_LABEL_FONT_SIZE = 26  # owner: 20, then 24, read too small on the road (2026-09-24)
 ADJACENT_LEFT_LEAD_COLOR = rl.Color(0, 150, 255, 255)
 ADJACENT_RIGHT_LEAD_COLOR = rl.Color(180, 0, 255, 255)
+ADJACENT_LANE_BLINDSPOT_COLOR = rl.Color(255, 0, 0, 255)  # same red as the C3/C3X blind spot lane
 ADJACENT_LANE_TINT_ALPHA = 90  # fill of the adjacent lane a side lead occupies
 ADJACENT_LEAD_MIN_ALPHA = 140
 # adjacent-lane markers draw smaller than the in-path ones, with a smaller speed label (owner: "slightly smaller,
@@ -263,7 +265,7 @@ class ModelRenderer(Widget):
       self._update_adjacent_leads(starpilot_radar_state, path_x_array, radar_state if render_lead_indicator else None)
       self._transform_dirty = False
 
-    self._draw_adjacent_lane_tint()
+    self._draw_adjacent_lane_tint(self._blindspot_sides(sm))
     self._draw_lane_lines()
     if self._params.get_bool("RainbowPath", default=False) and sm.valid.get('carState', False):
       self._rainbow_path.update(max(sm['carState'].vEgo, 0.0))
@@ -397,14 +399,33 @@ class ModelRenderer(Widget):
     n = min(n, self._get_path_length_idx(inner[:, 0], max_distance) + 1)
     edges = []
     for line in (inner[:n], outer[:n]):
-      proj, valid = self._project_points(line, np.zeros((2, n, 3), dtype=np.float32))
-      edges.append(proj[:2, 0][:, valid].T)
+      proj, _ = self._project_points(line, np.zeros((2, n, 3), dtype=np.float32))
+      # keep points that fall off screen (a near lane edge does): the polygon is clipped to the view when drawn
+      edges.append(proj[:2, 0][:, line[:, 0] >= 1.0].T)
     if len(edges[0]) < 2 or len(edges[1]) < 2:
       return np.empty((0, 2), dtype=np.float32)
+    if inner[:n, 1].mean() > outer[:n, 1].mean():
+      edges.reverse()  # strip winding like the lane lines: left edge first, right edge back
     return np.concatenate((edges[0], edges[1][::-1])).astype(np.float32, copy=False)
 
-  def _draw_adjacent_lane_tint(self) -> None:
-    for polygon, color in zip(self._adjacent_lane_polygons, (ADJACENT_LEFT_LEAD_COLOR, ADJACENT_RIGHT_LEAD_COLOR), strict=True):
+  def _blindspot_sides(self, sm) -> tuple[bool, bool]:
+    """Left/right blind spot occupied (car blind spot monitor or V-ASM), only when the BlindSpotPath toggle is on."""
+    if not self._params.get_bool("BlindSpotPath") or not sm.valid.get("carState", False):
+      return False, False
+    left, right = bool(sm["carState"].leftBlindspot), bool(sm["carState"].rightBlindspot)
+    if ui_state.starpilot_toggles.get("v_asm_enabled", False):
+      vasm_left, vasm_right = get_fresh_vasm_state(ui_state.live_params)
+      left, right = left or vasm_left, right or vasm_right
+    return left, right
+
+  def _draw_adjacent_lane_tint(self, blindspots=(False, False)) -> None:
+    """Blind spot paints its lane red (as on the C3/C3X); otherwise a lane holding a side lead is tinted blue/purple."""
+    for i, (lead_polygon, lead_color) in enumerate(zip(self._adjacent_lane_polygons,
+                                                       (ADJACENT_LEFT_LEAD_COLOR, ADJACENT_RIGHT_LEAD_COLOR), strict=True)):
+      polygon, color = lead_polygon, lead_color
+      if blindspots[i]:
+        polygon = self._lane_between_lines(*((1, 0) if i == 0 else (2, 3)), self._path.raw_points[:, 0])
+        color = ADJACENT_LANE_BLINDSPOT_COLOR
       if polygon.shape[0] >= 4:
         draw_polygon(self._rect, polygon, with_alpha(color, ADJACENT_LANE_TINT_ALPHA))
 
