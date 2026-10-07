@@ -296,8 +296,8 @@
       {
         "key": "NavLanePositioningAllowed",
         "label": "Route Lane Positioning",
-        "description": "Allow navigation to position in lane and request highway exit lane changes (nudge confirmed).",
-        "picker_description": "Lets navigation position in lane and request nudge-confirmed exit lane changes.",
+        "description": "Allow navigation to position in lane and request highway exit lane changes, confirmed by your blinker toward the exit.",
+        "picker_description": "Lets navigation position in lane and request blinker-confirmed exit lane changes.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "NavDesiresAllowed",

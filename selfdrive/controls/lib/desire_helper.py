@@ -396,8 +396,11 @@ class DesireHelper:
       # LaneChangeState.preLaneChange
       elif self.lane_change_state == LaneChangeState.preLaneChange:
         if one_blinker:
-          self.nav_exit_lane_change = False
-          self.lane_change_direction = self.get_lane_change_direction(carstate)
+          blinker_direction = self.get_lane_change_direction(carstate)
+          # a blinker toward the exit confirms the nav lane change; any other blinker takes over as a normal one
+          if blinker_direction != nav_exit_direction:
+            self.nav_exit_lane_change = False
+          self.lane_change_direction = blinker_direction
         elif self.nav_exit_lane_change:
           if nav_exit_direction == LaneChangeDirection.none or below_lane_change_speed:
             self.lane_change_state = LaneChangeState.off
@@ -417,8 +420,8 @@ class DesireHelper:
         blindspot_detected = self._get_combined_blindspot(carstate, self.lane_change_direction, v_asm_enabled=v_asm_enabled)
 
         if self.nav_exit_lane_change:
-          # Vision ASM is used: driver confirmation via steering nudge is strictly required before launching!
-          launch_allowed = torque_applied and not blindspot_detected
+          # Driver confirms with the blinker toward the exit (no native BSM; vision ASM can only block)
+          launch_allowed = one_blinker and not blindspot_detected
         else:
           if torque_applied:
             self.lane_change_wait_timer = starpilot_toggles.lane_change_delay
@@ -457,13 +460,13 @@ class DesireHelper:
 
         if self.lane_change_ll_prob > 0.99:
           self.lane_change_direction = LaneChangeDirection.none
-          if one_blinker:
-            self.lane_change_state = LaneChangeState.preLaneChange
-          elif self.nav_exit_lane_change and nav_exit_active:
-            # an exit can need more than one lane; every further move needs a driver nudge again
+          if self.nav_exit_lane_change and nav_exit_active:
+            # an exit can need more than one lane; every further move needs the blinker toward the exit again
             self.lane_change_state = LaneChangeState.preLaneChange
             self.lane_change_direction = nav_exit_direction
             self.lane_change_completed = False
+          elif one_blinker:
+            self.lane_change_state = LaneChangeState.preLaneChange
           else:
             self.lane_change_state = LaneChangeState.off
             self.nav_exit_lane_change = False

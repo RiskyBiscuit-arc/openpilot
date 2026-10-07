@@ -151,7 +151,7 @@ class StarPilotLateralLayout(_SettingsPage):
       ),
       SettingRow(
         "NavLanePositioningAllowed", "toggle", tr_noop("Route Lane Positioning"),
-        subtitle=tr_noop("Allow navigation to position in lane and request highway exit lane changes (nudge confirmed)."),
+        subtitle=tr_noop("Allow navigation to position in lane and request highway exit lane changes, confirmed by your blinker toward the exit."),
         get_state=lambda: p.get_bool("NavLanePositioningAllowed"),
         set_state=lambda s: p.put_bool("NavLanePositioningAllowed", s),
         visible=lambda: p.get_bool("NavDesiresAllowed"),

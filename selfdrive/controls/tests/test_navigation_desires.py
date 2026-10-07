@@ -579,7 +579,7 @@ def test_nav_lane_positioning_requires_driver_confirmation():
   assert helper.desire == log.Desire.none
 
 
-def test_nav_exit_lane_change_enters_pre_lane_change_and_requires_nudge():
+def test_nav_exit_lane_change_enters_pre_lane_change_and_requires_blinker():
   helper = DesireHelper()
   helper._update_nav_params = lambda: None
   helper._nav_instruction_state = {
@@ -604,7 +604,7 @@ def test_nav_exit_lane_change_enters_pre_lane_change_and_requires_nudge():
   assert helper.lane_change_direction == LaneChangeDirection.right
   assert helper.nav_exit_lane_change is True
 
-  # Frame 2: Even with nudgeless enabled, nav exit lane change refuses to launch without driver confirmation nudge
+  # Frame 2: Even with nudgeless enabled, nav exit lane change refuses to launch without the driver's blinker
   helper.update(
     make_car_state(vEgo=25.0, steeringPressed=False, steeringTorque=0.0),
     True,
@@ -615,7 +615,7 @@ def test_nav_exit_lane_change_enters_pre_lane_change_and_requires_nudge():
 
   assert helper.lane_change_state == LaneChangeState.preLaneChange
 
-  # Frame 3: Driver confirms with steering nudge in exit direction (-torque = right) -> transitions to laneChangeStarting!
+  # Frame 3: a steering nudge alone no longer confirms a nav exit lane change
   helper.update(
     make_car_state(vEgo=25.0, steeringPressed=True, steeringTorque=-1.5),
     True,
@@ -623,8 +623,19 @@ def test_nav_exit_lane_change_enters_pre_lane_change_and_requires_nudge():
     make_plan(laneWidthRight=4.0),
     toggles,
   )
+  assert helper.lane_change_state == LaneChangeState.preLaneChange
+
+  # Frame 4: Driver confirms with the blinker toward the exit -> transitions to laneChangeStarting
+  helper.update(
+    make_car_state(vEgo=25.0, rightBlinker=True),
+    True,
+    0.0,
+    make_plan(laneWidthRight=4.0),
+    toggles,
+  )
 
   assert helper.lane_change_state == LaneChangeState.laneChangeStarting
+  assert helper.nav_exit_lane_change is True
   assert helper.lane_change_direction == LaneChangeDirection.right
 
 
@@ -655,9 +666,9 @@ def test_nav_exit_lane_change_blocked_by_vision_asm():
   )
   assert helper.lane_change_state == LaneChangeState.preLaneChange
 
-  # Frame 2: Driver nudges right, but Vision ASM detects obstacle -> stays blocked in preLaneChange!
+  # Frame 2: Driver signals right, but Vision ASM detects obstacle -> stays blocked in preLaneChange!
   helper.update(
-    make_car_state(vEgo=25.0, rightBlindspot=False, steeringPressed=True, steeringTorque=-1.5),
+    make_car_state(vEgo=25.0, rightBlindspot=False, rightBlinker=True),
     True,
     0.0,
     make_plan(laneWidthRight=4.0),
@@ -726,3 +737,16 @@ def test_nav_exit_lane_change_ignores_forks():
   helper._nav_instruction_state = {"valid": True, "maneuverType": "fork", "maneuverModifier": "slightRight", "maneuverDistance": 400.0}
   helper.update(make_car_state(vEgo=25.0), True, 0.0, make_plan(), make_toggles(nav_exit_lane_change=True))
   assert helper.lane_change_state == LaneChangeState.off
+
+
+def test_nav_exit_opposite_blinker_becomes_normal_lane_change():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {"valid": True, "maneuverType": "off ramp", "maneuverModifier": "right", "maneuverDistance": 300.0}
+  toggles = make_toggles(nav_exit_lane_change=True, nudgeless=False)
+  helper.update(make_car_state(vEgo=25.0), True, 0.0, make_plan(), toggles)
+  assert helper.nav_exit_lane_change is True
+  helper.update(make_car_state(vEgo=25.0, leftBlinker=True), True, 0.0, make_plan(laneWidthLeft=4.0), toggles)
+  assert helper.nav_exit_lane_change is False
+  assert helper.lane_change_direction == LaneChangeDirection.left
+  assert helper.lane_change_state == LaneChangeState.preLaneChange
