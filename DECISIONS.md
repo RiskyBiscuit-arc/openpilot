@@ -2219,3 +2219,15 @@ Recovery firmware remains outside the updater-managed tree.
 `51214492b8e9ccc01db9fc707f6bdb682fa78dc3` updates only the main README,
 contributor instructions, and firmware-folder README. No runtime changes or
 vehicle evidence; no tests beyond documentation/whitespace review were needed.
+
+## D-098 — Add a landing README at the standalone EPS repository root
+
+**Decided 2026-10-06; owner request.** Standalone artifact
+`26736288f523a6dc7e1c4d3caf3340de1906bd9b` adds only root README.md, with
+fork-first installation, the recommended flasher, tool descriptions, and links
+to detailed instructions/contribution/licensing inside eps_tools/. Rejected:
+leaving the GitHub root without an introduction or moving the drop-in tools
+out of their folder. The root document source is retained here as
+`docs/eps_tools_repository_readme.md`, without replacing openpilot's own README.
+[CONFIRMED, static tree/link checks] All relative links resolve in the published
+tree. No runtime change, firmware addition, or hardware validation.

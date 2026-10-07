@@ -10913,3 +10913,13 @@ updater guidance distinguishes those copies/local firmware from committed
 tooling. Main README, contributor instructions, and both firmware-folder
 READMEs agree. Documentation only; whitespace checks passed, no executable
 changes, test reruns, hardware checks, or deployment.
+
+## 232. Standalone EPS repository root README added (2026-10-06). D-098.
+
+[CONFIRMED, static tree/link checks] Published standalone artifact
+`26736288f523a6dc7e1c4d3caf3340de1906bd9b` adds root README.md; tools remain
+under eps_tools/. Landing page introduces fork integration, flash.py, routine
+communication checks, firmware exclusion, and detailed usage/contribution links.
+Source retained as docs/eps_tools_repository_readme.md in this checkout. All
+relative links were verified against the published tree. Documentation only;
+no runtime tests or hardware checks needed or performed.
