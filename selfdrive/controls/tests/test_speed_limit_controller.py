@@ -8,7 +8,8 @@ from cereal import custom
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.controls.lib.speed_limit_controller import (
-  SOURCE_DASHBOARD, SOURCE_MAP, SOURCE_MAPBOX, SOURCE_NONE, SOURCE_PREVIOUS_LIMIT, SOURCE_VISION, SpeedLimitController,
+  SOURCE_DASHBOARD, SOURCE_MAP, SOURCE_MAPBOX, SOURCE_NONE, SOURCE_PREVIOUS_LIMIT, SOURCE_VISION, SLC_CONFIRMATION_TIMEOUT,
+  SpeedLimitController,
 )
 from openpilot.starpilot.controls.lib.mapbox_speed_limit import MapboxSpeedLimit
 
@@ -392,10 +393,27 @@ def test_higher_confirmation_forces_cruise_only_when_needed(controller_factory):
 def test_enabled_without_long_control_does_not_time_out_confirmation(controller_factory):
   controller = controller_factory(speed_limit_confirmation_lower=True)
   step(controller, dashboard=mph(55))
-  for _ in range(int(30 / DT_MDL) + 1):
+  for _ in range(int(SLC_CONFIRMATION_TIMEOUT / DT_MDL) + 1):
     step(controller, dashboard=mph(45), long_active=False, enabled=True)
   assert controller.confirmation_pending
   assert controller.denied_limit == 0
+
+
+def test_unanswered_lower_limit_is_denied_after_three_seconds(controller_factory):
+  assert SLC_CONFIRMATION_TIMEOUT == pytest.approx(3.0)
+  controller = controller_factory(speed_limit_confirmation_lower=True)
+  step(controller, dashboard=mph(55))
+  step(controller, dashboard=mph(45))
+  for _ in range(int(SLC_CONFIRMATION_TIMEOUT / DT_MDL) - 2):
+    step(controller, dashboard=mph(45))
+  assert controller.confirmation_pending
+  assert controller.target == pytest.approx(mph(55))
+  for _ in range(3):
+    step(controller, dashboard=mph(45))
+  assert not controller.confirmation_pending
+  assert controller.denied_limit == pytest.approx(mph(45))
+  assert controller.last_valid_limit == pytest.approx(mph(55))
+  assert controller.target == pytest.approx(mph(55))
 
 
 def test_rejection_and_timeout_do_not_change_history(controller_factory):
@@ -411,7 +429,7 @@ def test_rejection_and_timeout_do_not_change_history(controller_factory):
   step(controller, dashboard=mph(45))
   assert not controller.confirmation_pending
   step(controller, dashboard=mph(40))
-  for _ in range(int(30 / DT_MDL) + 1):
+  for _ in range(int(SLC_CONFIRMATION_TIMEOUT / DT_MDL) + 1):
     step(controller, dashboard=mph(40))
   assert controller.denied_limit == pytest.approx(mph(40))
   assert controller.last_valid_limit == pytest.approx(mph(55))

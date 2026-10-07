@@ -37,6 +37,9 @@ OFFSET_MAP_METRIC = [
 ]
 
 SLC_OVERRIDE_DISABLE_CLEAR_TIME = 0.75
+# An unanswered confirmation prompt is denied after this long, keeping the current limit.
+# Peter asked for 3 s instead of 30 s on 2026-10-06.
+SLC_CONFIRMATION_TIMEOUT = 3.0
 SET_SPEED_CHANGE_TOLERANCE_METERS_PER_SECOND = 0.1
 SAME_LIMIT_TOLERANCE = 1.0
 VISION_LARGE_REFERENCE_SPEED_DELTA = 30 * CV.MPH_TO_MS
@@ -342,7 +345,7 @@ class SpeedLimitController:
       if (higher and long_active and 0 < set_speed_kph < V_CRUISE_UNSET and
           set_speed_kph * CV.KPH_TO_MS < target_with_offset):
         memory.put_float("SLCForceCruiseSpeed", target_with_offset)
-    elif sm["starpilotCarState"].decelPressed or (self.confirmation_time >= 30 and long_active):
+    elif sm["starpilotCarState"].decelPressed or (self.confirmation_time >= SLC_CONFIRMATION_TIMEOUT and long_active):
       self._reject_limit(self.pending_limit)
 
   def _process_adopt_request(self, source, limit):
