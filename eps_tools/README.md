@@ -35,16 +35,42 @@ Run the scripts **from this folder** so `rwd_format` resolves; `opendbc`/`panda`
 come from the openpilot install (prefix with `PYTHONPATH=/data/openpilot` if you
 hit import errors).
 
-## Recommended: guided flash.py
+## Add to your openpilot fork (primary use)
 
-Supply a firmware image for your exact ECU under `rwd/`; firmware is not included
-in the standalone repository. Keep a validated matching stock recovery image.
-Use a persistent copy such as `/data/media/0/eps_tools/` on the comma.
+Copy the complete `eps_tools/` folder from this repository into the root of your
+openpilot fork, alongside `selfdrive/` and `tools/`, and commit the tooling to
+your fork. See [CONTRIBUTING.md](CONTRIBUTING.md) for importing future updates.
+The tools need the fork's `panda` and `opendbc` dependencies.
+
+Once your fork is installed on a comma, the tools are at
+`/data/openpilot/eps_tools/`. Run the recommended guided flasher there:
+
+```sh
+cd /data/openpilot/eps_tools
+PYTHONPATH=/data/openpilot python3 flash.py
+```
+
+## Alternative: standalone copy on a comma
+
+If you want to use the tools without adding them to your fork, copy `eps_tools/`
+to the comma. A manually dropped `/data/openpilot/eps_tools/` folder can be used,
+but it is untracked and can be removed by openpilot updates. For a standalone
+copy you want to keep across updates, use `/data/media/0/eps_tools/` instead:
 
 ```sh
 cd /data/media/0/eps_tools
 PYTHONPATH=/data/openpilot python3 flash.py
 ```
+
+This alternative still uses the installed openpilot dependencies. The media
+location is for standalone copies; it is not where you add the tools to a fork.
+
+## Recommended flasher: flash.py
+
+Supply a firmware image for your exact ECU under `rwd/`; firmware is not included
+in the standalone repository. Keep a validated matching stock recovery image.
+Run `python3 flash.py` from the tools folder for whichever installation above
+you use.
 
 The guided script lists compatible images when the cached car identification is
 available, checks the selected image, prompts you to turn the car OFF, and stops
@@ -64,7 +90,7 @@ reported and has a separate retry/recovery flow; recovery is not guaranteed.
 used by `flash.py`. Prefer the guided script. For manual use, stop openpilot with
 the car OFF (`sudo systemctl stop comma`, then `tmux kill-session -t comma`),
 then turn ignition ON with the engine OFF. Select the correct CAN bus explicitly.
-From the persistent tools folder:
+From your installed `eps_tools/` folder:
 
 ```sh
 # Dry run: stops before erase/programming.
@@ -114,9 +140,11 @@ A failure after erase can leave the EPS without power-steering assist. Recovery
 is not guaranteed. Retain a verified stock recovery image for your exact ECU;
 inspect the failure before retrying. The guided `flash.py` provides a recovery menu.
 
-**Flash from a persistent copy** (e.g. `/data/media/0/eps_tools/`), not from
-`/data/openpilot` — the comma updater deletes untracked files there, which could
-pull the image/parser out from under a flash.
+Tooling committed to your fork belongs under `/data/openpilot/eps_tools/`.
+Manually copied tools and locally supplied firmware there may be untracked and
+removed by an update. Keep recovery firmware outside the updater-managed tree,
+and do not run an openpilot update during flashing. For standalone tools, the
+alternative media location above keeps the copy outside that tree.
 
 ## Validate an image offline
 ```

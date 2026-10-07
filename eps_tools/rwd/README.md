@@ -19,8 +19,10 @@ python3 check_rwd.py rwd/*.rwd            # all
 ## Flash (see ../README.md and ../flash.py)
 Prefer the guided flasher: `python3 flash.py` (auto-detects bus, offers dry run).
 For the manual path, always run a `--danger`-less dry run first (it stops before
-erase; default bus is **1**), and flash from a persistent copy — the comma updater
-wipes untracked files from `/data/openpilot`. Some cars lock security access after
+erase; default bus is **1**). Tools committed to your fork live under
+`/data/openpilot/eps_tools/`; standalone copies may instead use
+`/data/media/0/eps_tools/`. The comma updater may remove untracked firmware
+from `/data/openpilot`, so retain recovery images outside that tree. Some cars lock security access after
 a dry run; wait / power-cycle before `--danger`, or use `flash.py`'s skip/retry.
 
 ## Contents

@@ -10901,3 +10901,15 @@ and the full suite passed. Ruff passed for every changed Python file using the
 standalone tools config; git diff whitespace checks passed. No hardware, live
 Panda, route replay, vehicle driving, live UDS timing, recovery, steering operation,
 closed-loop tests, radar/longitudinal build, or device deployment were performed.
+
+## 231. EPS install instructions now lead with adding to a fork (2026-10-06). D-097.
+
+[CONFIRMED, static documentation review] Published standalone commit
+`51214492b8e9ccc01db9fc707f6bdb682fa78dc3`. Primary instructions place
+eps_tools/ at the fork root, then run from /data/openpilot/eps_tools/ on the
+comma. /data/media/0/eps_tools/ is a clearly separated standalone alternative.
+Manual drops into the openpilot tree are described as possibly untracked;
+updater guidance distinguishes those copies/local firmware from committed
+tooling. Main README, contributor instructions, and both firmware-folder
+READMEs agree. Documentation only; whitespace checks passed, no executable
+changes, test reruns, hardware checks, or deployment.

@@ -24,7 +24,12 @@ firmware under `eps_tools/rwd/` in the clone.
 ## Drop into openpilot or update an existing fork
 
 Every distributed file lives under `eps_tools/` in the standalone repository.
-Copy that folder into your openpilot root. For a Git-based snapshot import,
+The primary installation is to copy that folder into your openpilot fork root
+and commit the tooling there. On the comma it then lives at
+`/data/openpilot/eps_tools/`. `/data/media/0/eps_tools/` is an alternative for
+standalone device copies, not the fork integration location.
+
+For a Git-based snapshot import,
 run from the openpilot root with a clean working tree:
 
 ```sh

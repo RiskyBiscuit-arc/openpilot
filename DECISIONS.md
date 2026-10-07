@@ -2203,3 +2203,19 @@ the restored suite passes. Standalone Python-3.9 lint configuration checks
 correctness without inheriting openpilot's ban on stdlib unittest. No erase/program
 sequence, firmware constant, bus default, or explicit flash confirmation changed.
 No live UDS timing, ECU recovery, steering operation, or closed loop was verified.
+
+## D-097 — Lead EPS installation docs with fork integration; media is a standalone alternative
+
+**Decided 2026-10-06; owner clarification.** The primary use is committing
+`eps_tools/` at an openpilot fork's root, deployed as `/data/openpilot/eps_tools/`.
+Rejected: leading flashing instructions with `/data/media/0/eps_tools/` or
+blanket advice against running tools from the openpilot tree. Media is an
+alternative for standalone comma copies. A manual drop into the openpilot tree
+is supported but may be untracked; updater removal concerns apply to those
+copies and local firmware, not an instruction to relocate tracked fork tooling.
+Recovery firmware remains outside the updater-managed tree.
+
+[CONFIRMED, static documentation/tree review] Standalone artifact
+`51214492b8e9ccc01db9fc707f6bdb682fa78dc3` updates only the main README,
+contributor instructions, and firmware-folder README. No runtime changes or
+vehicle evidence; no tests beyond documentation/whitespace review were needed.
