@@ -138,7 +138,9 @@ def test_ui_restores_hierarchical_sub_toggle_rendering():
   assert "SettingTree" in settings
   assert '<SettingTree :params="ordinaryParams(activeSection)"' in settings
   assert '<LongitudinalMode v-if="modeSection(activeSection)"' in settings
-  assert 's.params.filter(p => !this.isModeParam(p))' in settings
+  assert 's.params.filter(p => !this.isModeParam(p) && ' in settings
+  # Starpilot Auto renders its enable toggle in its own card, not in the tree.
+  assert '!(s.name === "Starpilot Auto" && p.key === "StarpilotAutoEnabled")' in settings
 
   # SettingTree recursively reveals children; subpanels are collapsed by default
   # (classic Galaxy behavior) and expand only when the user taps Manage/Close.
