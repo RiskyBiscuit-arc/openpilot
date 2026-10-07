@@ -1,5 +1,9 @@
 # EPS tools
 
+Canonical tooling repository: [RiskyBiscuit-arc/eps-tools](https://github.com/RiskyBiscuit-arc/eps-tools).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and fork updates.
+The standalone repository keeps `rwd/` but distributes no firmware images.
+
 Standalone tooling for reading, validating, and flashing Honda/Acura EPS
 firmware (`.rwd`). Works on the current opendbc layout — no panda-submodule or
 `selfdrive.car` dependencies.
@@ -23,7 +27,7 @@ eps_tools/
   rwd_xray/         cfranyota/rwd-xray @ 8d8e1ff (MIT), reference copy: eps_tool.py patch offsets and
                     table values per EPS, table/checksum search tools. Its format/ is the Python-2 original
                     of rwd_format/, which is the one to run.
-  rwd/              checksum-validated firmware images + upstreaming guidelines
+  rwd/              local firmware images (not distributed by eps-tools)
 ```
 
 Run the scripts **from this folder** so `rwd_format` resolves; `opendbc`/`panda`
@@ -35,7 +39,8 @@ hit import errors).
 1. Make sure the comma power is connected to the car's OBD2 port.
 2. With the car **OFF**, stop openpilot over SSH:
    ```
-   pkill -f openpilot
+   sudo systemctl stop comma
+   tmux kill-session -t comma
    ```
 3. Put the car in full **accessory mode** (ignition ON, engine OFF). Turn off the
    A/C to avoid draining the battery.
@@ -74,11 +79,9 @@ python3 eps-diag.py -b 1
 ```
 
 ## If a flash fails / crashes
-Don't panic — **the EPS is not permanently bricked.** The flash erases before it
-writes, so a crash mid-flash leaves the EPS erased: no power-steering assist until
-it's flashed properly. Just run the same `--danger` command again; you may need to
-power-cycle the car and/or the comma a few times before it lets you redo a failed
-flash. Keep a verified `stock` `.rwd` on hand as the recovery image.
+A failure after erase can leave the EPS without power-steering assist. Recovery
+is not guaranteed. Retain a verified stock recovery image for your exact ECU;
+inspect the failure before retrying. The guided `flash.py` provides a recovery menu.
 
 **Flash from a persistent copy** (e.g. `/data/media/0/eps_tools/`), not from
 `/data/openpilot` — the comma updater deletes untracked files there, which could
@@ -90,5 +93,5 @@ python3 check_rwd.py rwd/39990-TLA-A040-linear-max.rwd
 python3 check_rwd.py rwd/*.rwd
 ```
 
-See `rwd/README.md` for the firmware images and upstreaming guidelines (a mod may
-only be added alongside a verified stock recovery image).
+See `rwd/README.md` for local firmware handling. Firmware is excluded from the
+standalone tools repository.

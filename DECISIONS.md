@@ -2129,3 +2129,22 @@ neutral P/I multipliers, opt-in toggle) stands.
 Rejected: keeping the compact-drive fit with a unit conversion only (the bias and roll defects remain), and the
 median R6/rate ratio (lag-biased). Not done: any road test of the changed controller; no claim about closed-loop
 behaviour follows from these offline fits.
+
+## D-094 — Separate EPS tooling into RiskyBiscuit-arc/eps-tools; exclude firmware
+
+**Decided 2026-10-06; owner requested a standalone contributor repository.**
+Canonical tooling now lives at https://github.com/RiskyBiscuit-arc/eps-tools,
+initial commit `ee6a2cb46a486d3e9c0091eaea192755067b4759`. The export was built
+from this single checkout, base `bf9b7371a01fda3a8adf3f95a14008feb81caba8`,
+with separation documentation added. It has a new root history, 38 files, no
+`.rwd` files, and `rwd/README.md` retains the folder. Existing firmware stays
+in this fork. `rwd_format/` remains canonical under D-066.
+
+Rejected: exporting directory history containing firmware, creating a parallel
+working copy, or silently replacing the existing tools directory with a submodule.
+New fork integrations may use a pinned Git subtree. Existing plain directories
+use reviewed snapshots until an explicit subtree migration; archive imports do
+not remove retired tooling, which must be reviewed and removed explicitly.
+Update instructions are in `eps_tools/CONTRIBUTING.md`. No runtime tooling was
+changed; ten production Python files passed static syntax checks. This is not
+bench, flashing, vehicle, or closed-loop validation.

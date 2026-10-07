@@ -10843,3 +10843,21 @@ Tests: `selfdrive/controls/tests/test_brake_onset.py` 23 pass (static). Galaxy s
 - **Expected effect, from existing replay.** STATUS 212 (2df, all-on vs all-off): RangeKF changed 162 of 60154 frames, always as more braking, by 0.2-0.4 m/s^2 (1434.3 s -0.65 -> -1.00, 1435.0 s -1.00 -> -1.38, 1438.6 s -2.71 -> -2.91, 1064.9 s -1.68 -> -1.93). On 2e1 it was negligible. Without it those onsets start up to ~1 s later (range leads U11 by 0.88-1.28 s, D-044), which is the less conservative direction.
 - **Not verified.** No new replay was run for the removal; the numbers above are the earlier toggle comparison. Not driven.
 - **Tests.** The 12 range KF test functions are replaced by one removal test. Radar and longitudinal suite: 186 pass.
+
+## 228. EPS tools standalone repository published (2026-10-06). D-094.
+
+[CONFIRMED, static export and Git remote readback] Public repository
+https://github.com/RiskyBiscuit-arc/eps-tools has main commit
+`ee6a2cb46a486d3e9c0091eaea192755067b4759`: 38 files, no `.rwd` files or
+inherited firmware history, retained `rwd/` via its README. Source base is
+`bf9b7371a01fda3a8adf3f95a14008feb81caba8` on the actual current branch
+`ns-bosch-updated` (the introduction's branch name is stale). No second
+checkout was created. Existing fork firmware remains intact. Added source
+licensing, firmware/cache ignore rules, and contributor/update documentation.
+README service-stop guidance now matches the guided flasher, and its former
+guarantee of recovery after a failed flash was removed. Production code was
+unchanged; static syntax checks passed for 10 Python files. No hardware, UDS
+bench test, flash, vehicle drive, dependency import/build, or closed-loop
+validation was performed. The existing directory remains a plain vendored
+snapshot; subtree instructions apply to new integrations, not an automatic
+conversion of this fork.
