@@ -182,7 +182,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // must survive a reboot, or every ignition cycle would rebuild a multi-minute engine.
     {"AcceleratorProgress", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_AcceleratorUnavailable", {CLEAR_ON_MANAGER_START, JSON}},
-    {"JetlinkLink", {PERSISTENT | BACKUP, INT, "0"}},
+    {"JetlinkLink", {PERSISTENT, INT, "0"}},
     {"JetlinkSpec", {PERSISTENT, JSON}},
     {"JetlinkModelPointers", {PERSISTENT, JSON}},
     // an iPhone on a direct cable charges from the comma; off by default, some
