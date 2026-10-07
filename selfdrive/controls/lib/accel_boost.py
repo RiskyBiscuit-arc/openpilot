@@ -14,11 +14,6 @@ class AccelBoost:
     self.boost_this_override = 0.0
     self.boost_eligible = False
 
-  def reset(self):
-    self.total_boost = 0.0
-    self.boost_this_override = 0.0
-    self.boost_eligible = False
-
   def update(self, sm, output_a_target_e2e, output_a_target_mpc, a_cruise):
     enabled = sm['selfdriveState'].enabled
     gas_pressed = sm['carState'].gasPressed

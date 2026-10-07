@@ -695,8 +695,7 @@ EXPERIMENTAL_HANDOFF_KEEP_E2E_BRAKE = -0.15
 # then confirmed on four logged drives with the toggle on (136c-136f): logged aTarget matched the
 # replay within 0.02 on 95-97% of acting frames, no hard brake in the 5-8 s after an episode was
 # caused by it, and 0 frames lifted while a lead closed faster than 0.5 m/s or braked harder than
-# -1.0. Baked in in 136g; Accel Boost built in on (136h; the GasOverrideBoost toggle
-# was removed 2026-10-03, replays set toggles.gas_override_boost False): still Experimental Mode only (get_exp_lead_departure_weight
+# -1.0. Baked in in 136g; Accel Boost built in on (136h; no toggle): still Experimental Mode only (get_exp_lead_departure_weight
 # requires a lead at or beyond the follow distance, and update_exp_lead_departure only runs on the
 # tinygrad-model branch below), and every other gate is unchanged. When a lead is at or beyond the
 # follow distance and pulling away, lift the e2e target part of the way toward the MPC. Stateless
@@ -3379,15 +3378,11 @@ class LongitudinalPlanner:
         self.v_desired_trajectory, self.a_desired_trajectory,
         action_t=plan_action_t, vEgoStopping=starpilot_toggles.vEgoStopping)
       output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
-      accel_boost_on = bool(getattr(starpilot_toggles, "gas_override_boost", True))
-      if accel_boost_on:
-        # Port of commaai/openpilot PR 39015: boost the e2e target ahead of arbitration.
-        # Upstream compares against min(mpc, a_cruise). a_cruise here is the accel that reaches v_cruise
-        # within the actuator delay, the same formula as the downstream lead cruise cap.
-        a_cruise = max(0.0, (v_cruise - scene_v_ego + 0.01) / max(action_t, self.dt))
-        output_a_target_e2e = self.accel_boost.update(sm, output_a_target_e2e, output_a_target_mpc, a_cruise)
-      else:
-        self.accel_boost.reset()
+      # Port of commaai/openpilot PR 39015: boost the e2e target ahead of arbitration.
+      # Upstream compares against min(mpc, a_cruise). a_cruise here is the accel that reaches v_cruise
+      # within the actuator delay, the same formula as the downstream lead cruise cap.
+      a_cruise = max(0.0, (v_cruise - scene_v_ego + 0.01) / max(action_t, self.dt))
+      output_a_target_e2e = self.accel_boost.update(sm, output_a_target_e2e, output_a_target_mpc, a_cruise)
       output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
       exp_active = not (self.mode == 'acc' or self.generation == 'v9')
@@ -3425,14 +3420,10 @@ class LongitudinalPlanner:
           getattr(sm['starpilotPlan'], 'forcingStop', False) or
           getattr(sm['starpilotPlan'], 'redLight', False)
         )
-        if accel_boost_on:
-          output_a_target = self.update_exp_lead_departure(
-            output_a_target, output_a_target_e2e, output_a_target_mpc, scene_v_ego,
-            sm['starpilotPlan'].tFollow, hold_experimental,
-          )
-        else:
-          self.exp_lead_departure_weight = 0.0
-          self.exp_lead_departure_lift = 0.0
+        output_a_target = self.update_exp_lead_departure(
+          output_a_target, output_a_target_e2e, output_a_target_mpc, scene_v_ego,
+          sm['starpilotPlan'].tFollow, hold_experimental,
+        )
     else:
       output_a_target, output_should_stop = get_accel_from_plan(
         self.v_desired_trajectory, self.a_desired_trajectory,
