@@ -11,6 +11,7 @@ import {
   highlightRoute,
   rankEcoRoutes,
 } from "./navigation_utilities.js?v=nav-route-prefs-1";
+import { NavigationSettings } from "./navigation_settings.js?v=nav-settings-1";
 import { Modal } from "/assets/components/modal.js";
 
 function sha1hex(str) {
@@ -243,6 +244,7 @@ const state = reactive({
   previousDestinations: "[]",
   searchProvider: "mapbox",
   selectedRoute: null,
+  settingsVisible: false,
   routePreferences: {
     avoid_tolls: false,
     avoid_highways: false,
@@ -303,23 +305,55 @@ export function NavDestination() {
   }
 
   async function toggleRoutePreference(key) {
-    state.routePreferences[key] = !state.routePreferences[key];
-    fetch("/api/navigation/preferences", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(state.routePreferences)
-    }).catch(() => {});
-    if (state.selectedRoute?.destinationCoordinates) {
-      initiateNavigation({
-        name: state.selectedRoute.name,
-        longitude: state.selectedRoute.destinationCoordinates[0],
-        latitude: state.selectedRoute.destinationCoordinates[1],
-        routeId: state.selectedRoute.routeId
+    state.routePreferences = { ...state.routePreferences, [key]: !state.routePreferences[key] };
+    const preferences = {
+      avoid_tolls: Boolean(state.routePreferences.avoid_tolls),
+      avoid_highways: Boolean(state.routePreferences.avoid_highways),
+      avoid_ferries: Boolean(state.routePreferences.avoid_ferries),
+      prefer_eco: Boolean(state.routePreferences.prefer_eco)
+    };
+    try {
+      await fetch("/api/navigation/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preferences)
       });
+    } catch {
+      showSnackbar("Could not save route preferences.", "error");
     }
+    const selected = state.selectedRoute;
+    if (!selected?.destinationCoordinates) return;
+    const destination = {
+      name: selected.name,
+      longitude: selected.destinationCoordinates[0],
+      latitude: selected.destinationCoordinates[1],
+      routeId: selected.routeId
+    };
+    let keepConfirmed = false;
+    if (areRoutesEqual(selected, state.confirmedRoute)) {
+      // The car is already routing: re-send the active destination with the new preferences
+      // (same POST as Start Navigation) so the comma re-routes, not just this preview.
+      try {
+        const res = await fetch("/api/navigation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...destination, ...preferences })
+        });
+        const result = await res.json().catch(() => ({}));
+        if (res.ok) {
+          keepConfirmed = true;
+          showSnackbar("Active route updated with new preferences.");
+        } else {
+          showSnackbar(result.message || "Could not update the active route.", "error");
+        }
+      } catch {
+        showSnackbar("Could not reach the comma to update the active route.", "error");
+      }
+    }
+    await initiateNavigation(destination, { keepConfirmed });
   }
 
-  async function initiateNavigation(destination, { resume = false } = {}) {
+  async function initiateNavigation(destination, { resume = false, keepConfirmed = false } = {}) {
     state.selectedRoute = null;
     state.confirmedRoute = null;
     state.loadingRoute = true;
@@ -375,7 +409,11 @@ export function NavDestination() {
         };
 
         state.selectedRoute = selected;
-        if (resume) state.confirmedRoute = JSON.parse(JSON.stringify(selected));
+        if (resume || keepConfirmed) state.confirmedRoute = JSON.parse(JSON.stringify(selected));
+        if (keepConfirmed) {
+          localStorage.setItem("activeRouteId", selected.routeId);
+          state.confirmedRouteRefresh = Math.random();
+        }
 
         localStorage.setItem("lastRouteId", selected.routeId);
 
@@ -841,6 +879,9 @@ export function NavDestination() {
                   <a href="/manage_navigation_keys" class="keys-required-button">Go to "Manage Keys"</a>
                 </div>
               </section>
+              <section class="navigation-settings-standalone">
+                ${NavigationSettings({ getRoutePreferences: () => state.routePreferences, toggleRoutePreference })}
+              </section>
             `
         : html`
               <div class="map-wrapper">
@@ -848,6 +889,7 @@ export function NavDestination() {
                   <div class="search-controls">
                     <input autocomplete="off" id="search-field" placeholder="Search here" value="${() => searchFieldState.value}" @input="${searchInput}" @keydown="${handleSearchKey}" />
                     ${() => (state.favoritesCount > 0 ? html`<button class="favorites-toggle-button" @click="${handleFavoritesClick}">❤️ Favorites</button>` : "")}
+                    <button type="button" class="${() => "favorites-toggle-button navigation-settings-toggle" + (state.settingsVisible ? " active" : "")}" aria-pressed="${() => (state.settingsVisible ? "true" : "false")}" @click="${() => { state.settingsVisible = !state.settingsVisible; }}"><i class="bi bi-gear"></i> Settings</button>
                     ${() => (state.canToggleProvider ? html`
                       <div class="search-provider-toggle">
                         <button class="${() => (state.searchProvider === "amap" ? "active" : "")}" title="AMap / Gaode search provider" @click="${() => { state.searchProvider = "amap"; state.suggestions = "[]"; }}">AMap</button>
@@ -856,6 +898,11 @@ export function NavDestination() {
                     ` : "")}
                   </div>
                   <div id="infobox">
+                    ${() => (state.settingsVisible ? NavigationSettings({
+            getRoutePreferences: () => state.routePreferences,
+            toggleRoutePreference,
+            onClose: () => { state.settingsVisible = false; }
+          }) : "")}
                     ${() => {
             if (state.loadingRoute) {
               return html`<div class="navigation-summary-widget loading-status"><span class="spinner"></span> Calculating route...</div>`;

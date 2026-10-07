@@ -89,8 +89,8 @@ def test_ui_uses_same_backend_endpoints():
   api = _read("js/api.js")
 
   # Settings fetches the exact same layout JSON + params API the original UI used.
-  assert '/assets/components/tools/device_settings_layout.json?v=nav-route-prefs-1' in settings or \
-    '/assets/components/tools/device_settings_layout.json?v=nav-route-prefs-1' in api
+  assert '/assets/components/tools/device_settings_layout.json?v=nav-settings-1' in settings or \
+    '/assets/components/tools/device_settings_layout.json?v=nav-settings-1' in api
   assert '"/api/params/all"' in api
   assert '"/api/params"' in api
   assert '"/api/params/defaults"' in api
@@ -502,7 +502,7 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   assert "GalaxyEmbed" not in tuning and "LateralTuningPanel" in tuning
   assert _read("js/components/MapsPanel.js") and _read("js/components/NavigationKeysPanel.js")
   destination = _read("js/components/NavigationDestinationPanel.js")
-  assert '"./views/Navigation.js?v=area-picker-1"' in _read("js/app.js")
+  assert '"./views/Navigation.js?v=nav-settings-1"' in _read("js/app.js")
   assert '"../components/NavigationDestinationPanel.js?v=nav-route-prefs-1"' in _read("js/views/Navigation.js")
   assert "mapboxSuggest" in destination and "mapboxRetrieve" in destination
   assert "mapboxGeocode" in destination and "mapboxDirections" in destination

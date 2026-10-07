@@ -285,7 +285,7 @@
       {
         "key": "NavDesiresAllowed",
         "label": "Use Route Desires",
-        "description": "Allow navigation to request lane keep and turns.",
+        "description": "Let an active navigation route request turns. A turn is requested only when your blinker points the same way as the route, you are below the minimum lane change speed, and blind spot monitoring (or V-ASM) sees no car on that side.",
         "picker_description": "Allows navigation to request lane keep and turns.",
         "data_type": "bool",
         "ui_type": "toggle",
@@ -296,7 +296,7 @@
       {
         "key": "NavLanePositioningAllowed",
         "label": "Route Lane Positioning",
-        "description": "Allow navigation to position in lane and request highway exit lane changes, confirmed by your blinker toward the exit.",
+        "description": "Requires Use Route Desires. Route lane keeping on forks and slight bends needs a light steering nudge toward the route. Highway exits (off-ramps within 500 m) start a lane change when you turn on the blinker toward the exit; no nudge is used, and blind spot monitoring (or V-ASM) seeing a car blocks it.",
         "picker_description": "Lets navigation position in lane and request blinker-confirmed exit lane changes.",
         "data_type": "bool",
         "ui_type": "toggle",

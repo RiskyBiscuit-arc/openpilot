@@ -593,3 +593,74 @@
     width: calc(100% - var(--padding-xl));
   }
 }
+
+/* ――― Navigation settings panel ――― */
+.navigation-settings-toggle {
+  flex-shrink: 0;
+  min-width: auto;
+  white-space: nowrap;
+}
+
+.navigation-settings-toggle.active {
+  border-color: var(--main-fg);
+  color: var(--main-fg);
+  font-weight: var(--font-weight-bold);
+}
+
+.navigation-settings-panel {
+  animation: fadeInUp 0.3s ease-out;
+  margin-top: var(--margin-sm);
+  max-height: calc(100vh - 8rem);
+  overflow-y: auto;
+  /* The search wrapper is 30% of the map; give the settings rows room to read. */
+  width: max(100%, min(22rem, 70vw));
+}
+
+.navigation-settings-panel .ds-section {
+  margin-bottom: var(--margin-sm);
+}
+
+.navigation-settings-panel .ds-row {
+  gap: var(--padding-sm);
+}
+
+.navigation-settings-panel .ds-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.navigation-settings-panel .ds-toggle {
+  flex-shrink: 0;
+}
+
+.navigation-settings-panel .nav-settings-number {
+  background-color: var(--input-bg);
+  border: var(--border-width-thin) solid var(--track-color);
+  border-radius: var(--border-radius-md);
+  color: var(--text-color);
+  flex-shrink: 0;
+  padding: 0 var(--padding-sm);
+  width: 5.5rem;
+}
+
+.navigation-settings-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 var(--padding-xs);
+}
+
+.navigation-settings-close:hover {
+  color: var(--text-color);
+}
+
+.navigation-settings-standalone {
+  margin: var(--margin-lg) auto 0;
+  max-width: 40rem;
+  padding: 0 var(--padding-base);
+}
+
+.navigation-settings-standalone .navigation-settings-panel {
+  max-height: none;
+}

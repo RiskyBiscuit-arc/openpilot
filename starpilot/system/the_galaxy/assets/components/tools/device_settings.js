@@ -647,7 +647,7 @@ async function fetchLayoutAndParams() {
   state.loadingValues = true
 
   try {
-    const layoutRes = await fetch("/assets/components/tools/device_settings_layout.json?v=nav-route-prefs-1", { cache: "no-store" })
+    const layoutRes = await fetch("/assets/components/tools/device_settings_layout.json?v=nav-settings-1", { cache: "no-store" })
     const rawLayoutData = await layoutRes.json()
 
     let layoutData = rawLayoutData
