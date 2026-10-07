@@ -390,6 +390,27 @@ STOCK_FEEL_MIN_CLOSING = 0.5  # m/s
 # a simulated gap crossed TTC 2 s or a lead began opening (e5 -11.9, dfa -33, dfb -15 m/s^3). Stock's own p98 rate is
 # 2-3.4 m/s^3 at every TTC; 5 reaches -3.5 from -1.85 in 0.33 s.
 STOCK_FEEL_JERK_OUTSIDE = 5.0  # m/s^3
+# Lead stopping (owner 2026-10-07, 000002f2, proposed; static only). The depth table follows TTC only, so a lead braking
+# hard to a stop looked like a steady slow lead: on 2f2 1099 and 1483 the target sat at the -2.3 cap for 3-4 s while the
+# gap fell 33 -> 6 m, then dropped to -3.5 at TTC 2 s and the car stopped 2.5 / 3.4 m behind. With this on, when a closing
+# lead is braking (aLeadK at or below STOCK_FEEL_LEAD_STOP_A) and stopping behind the point where it will stop
+# (STOCK_FEEL_LEAD_STOP_GAP short of it) needs more than the table's depth, the cap moves to that need (never below the
+# vehicle minimum; the planner's own target still applies when shallower) and deepens at STOCK_FEEL_JERK_OUTSIDE, as
+# below the TTC floor. A steady slow lead never stops, so it is untouched.
+STOCK_FEEL_LEAD_STOP = False
+STOCK_FEEL_LEAD_STOP_A = -1.0  # m/s^2
+STOCK_FEEL_LEAD_STOP_GAP = 4.0  # m
+# Stop ease (owner 2026-10-07, 000002f2, proposed; static only). Every hard stop on 2f2 reached standstill still braking
+# -1.6..-1.7 (longcontrol's stopping state only ever deepens, so it held -2.0/-2.27 through the stop): the clunk. With
+# this on, under STOP_EASE_BP[-1] the brake may go no deeper than STOP_EASE_V at that speed, easing to about -0.5 at
+# the stop, both in the planner target and in longcontrol's stopping state while still rolling, rising at most
+# STOP_EASE_JERK. Only when the eased stop still ends STOP_EASE_MIN_GAP short of the lead (no lead: always); it adds
+# about 0.5 m from 3 m/s against a constant -2.3.
+STOP_EASE = False
+STOP_EASE_BP = [0.0, 1.0, 3.0]  # m/s
+STOP_EASE_V = [-0.5, -1.1, -2.5]  # m/s^2
+STOP_EASE_JERK = 2.0  # m/s^3
+STOP_EASE_MIN_GAP = 2.0  # m
 # Coast to the lead, part of the StockBrakeFeel toggle (owner, 2026-10-07: "approach the solution as more like a true
 # coast, like kill accel all together then resuming the stock brake feel brake when appropriate"). Logged routes
 # 2ed-2f1 (STATUS 222): in town the planner kept +0.1..+0.6 of throttle while already closing on the lead at 0.9-1.3 m/s
@@ -507,15 +528,61 @@ def brake_onset_ttc(leads, min_closing: float = 1e-3) -> float:
   return ttc_min
 
 
-def stock_feel_target(leads, prev: float, target: float, dt: float) -> float:
+def lead_stop_need(leads, v_ego: float) -> float:
+  """Decel (m/s^2, >= 0) to stop STOCK_FEEL_LEAD_STOP_GAP behind where the worst closing, braking lead will stop; 0 when
+  no closing lead is braking at STOCK_FEEL_LEAD_STOP_A or harder."""
+  need = 0.0
+  for lead in leads:
+    if lead is None or not bool(getattr(lead, 'status', False)) or not -float(lead.vRel) > STOCK_FEEL_MIN_CLOSING:
+      continue
+    a_lead = float(getattr(lead, 'aLeadK', 0.0))
+    if not a_lead <= STOCK_FEEL_LEAD_STOP_A:
+      continue
+    v_lead = max(float(getattr(lead, 'vLead', v_ego + float(lead.vRel))), 0.0)
+    room = float(lead.dRel) + v_lead * v_lead / (2.0 * -a_lead) - STOCK_FEEL_LEAD_STOP_GAP
+    need = max(need, float(v_ego) ** 2 / (2.0 * max(room, 0.5)))
+  return need
+
+
+def stock_feel_target(leads, prev: float, target: float, dt: float, v_ego: float = 0.0) -> float:
   """D-086 stock Honda ACC brake law: while a lead is closing and the worst TTC is over STOCK_FEEL_TTC_FLOOR_S, the
   target goes no deeper than stock's depth at that TTC and deepens no faster than stock's rate; otherwise the planner's
-  depth is kept and deepens at most STOCK_FEEL_JERK_OUTSIDE."""
+  depth is kept and deepens at most STOCK_FEEL_JERK_OUTSIDE. STOCK_FEEL_LEAD_STOP: when stopping behind a braking lead
+  needs more than the table's depth, the cap is that need instead, deepening at STOCK_FEEL_JERK_OUTSIDE."""
   ttc = brake_onset_ttc(leads, STOCK_FEEL_MIN_CLOSING)
   if not ttc > STOCK_FEEL_TTC_FLOOR_S or ttc == float('inf'):
     return brake_onset_limited_target(prev, target, dt, STOCK_FEEL_JERK_OUTSIDE)
-  target = max(target, float(np.interp(ttc, STOCK_FEEL_DEPTH_BP, STOCK_FEEL_DEPTH_V)))
+  depth = float(np.interp(ttc, STOCK_FEEL_DEPTH_BP, STOCK_FEEL_DEPTH_V))
+  if STOCK_FEEL_LEAD_STOP:
+    need = lead_stop_need(leads, v_ego)
+    if need > -depth:
+      return brake_onset_limited_target(prev, max(target, -min(need, 3.5)), dt, STOCK_FEEL_JERK_OUTSIDE)
+  target = max(target, depth)
   return brake_onset_limited_target(prev, target, dt, float(np.interp(ttc, STOCK_FEEL_JERK_BP, STOCK_FEEL_JERK_V)))
+
+
+def stop_ease_distance(v: float) -> float:
+  """Distance (m) to stop from v under the STOP_EASE_V floor."""
+  n = 20
+  dv = max(float(v), 0.0) / n
+  return float(sum((i + 0.5) * dv * dv / -float(np.interp((i + 0.5) * dv, STOP_EASE_BP, STOP_EASE_V)) for i in range(n)))
+
+
+def stop_ease_floor(v_ego: float, d_lead: float | None) -> float | None:
+  """STOP_EASE floor (m/s^2) for the target at this speed, or None when off, above STOP_EASE_BP[-1], or when the eased
+  stop would end closer than STOP_EASE_MIN_GAP to the lead."""
+  if not STOP_EASE or not float(v_ego) < STOP_EASE_BP[-1]:
+    return None
+  if d_lead is not None and stop_ease_distance(v_ego) > float(d_lead) - STOP_EASE_MIN_GAP:
+    return None
+  return float(np.interp(max(float(v_ego), 0.0), STOP_EASE_BP, STOP_EASE_V))
+
+
+def stop_eased_target(prev: float, target: float, floor: float | None, dt: float) -> float:
+  """Raise a target below the STOP_EASE floor toward it, at most STOP_EASE_JERK * dt per step above prev."""
+  if floor is None or not target < floor:
+    return float(target)
+  return float(min(floor, max(target, prev + STOP_EASE_JERK * dt)))
 
 
 LEAD_COAST_OFF, LEAD_COAST_HOLD, LEAD_COAST_COAST = 0, 1, 2
@@ -4250,10 +4317,14 @@ class LongitudinalPlanner:
         leads = (self.lead_one, self.lead_two)
         if brake_onset_ttc(leads, STOCK_FEEL_MIN_CLOSING) == float('inf') and brake_onset_ttc(leads) > STOCK_FEEL_TTC_FLOOR_S:
           output_a_target = brake_onset_limited_target(prev_output_a_target, output_a_target, self.dt, LEAD_COAST_BRAKE_JERK)
-      output_a_target = stock_feel_target((self.lead_one, self.lead_two), prev_output_a_target, output_a_target, self.dt)
+      output_a_target = stock_feel_target((self.lead_one, self.lead_two), prev_output_a_target, output_a_target, self.dt,
+                                          scene_v_ego)
     else:
       self.lead_coast_active = LEAD_COAST_OFF
       self.lead_coast_ceiling = None
+    if bool(getattr(starpilot_toggles, "stock_brake_feel", False)) and not reset_state and not bool(sm['carState'].standstill):
+      d_lead = float(self.lead_one.dRel) if bool(getattr(self.lead_one, 'status', False)) else None
+      output_a_target = stop_eased_target(prev_output_a_target, output_a_target, stop_ease_floor(scene_v_ego, d_lead), self.dt)
     if BRAKE_RELEASE_LIMIT and not reset_state and not bool(sm['carState'].standstill):
       # prev is the last published target (after the on-path bound in update(), which runs after this)
       output_a_target = brake_release_limited_target(prev_output_a_target, output_a_target, self.dt)
