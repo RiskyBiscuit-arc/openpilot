@@ -1847,28 +1847,34 @@ radard's main() calls `set_bosch_a_newborn_leads(honda_bosch_a_radar)`, so non-B
 `params_pyx.so`. The same change builds in Accel Boost (`GasOverrideBoost` removed) and, on pr10-smooth, D-072's
 short read-ahead (`PlannerShortActionTime` removed). Replay and static evidence only; not road-validated.
 
-## D-076 — PROPOSED (toggle OFF): `BoschARangeOffsetFallback` uses the firmware fallback range offset −335/128 instead of −3.0
-Recorded 2026-10-03, owner decision (Peter, in chat): add a toggle so he can drive the firmware fallback offset and
-compare it with −3.0. **Static evidence only; no road evidence.** With the toggle OFF, dRel is
-`raw/16 + BOSCH_A_RANGE_OFFSET_M` (−3.0), byte for byte.
+## D-076 — ACCEPTED (owner, 2026-10-07): fixed firmware ROM-default range offset per car, no toggle
+Recorded 2026-10-07, owner decision (Peter, in chat): "fix the internal code to reflect the fw default offset for my
+Civic and CR-V, and remove the toggle completely." **Static evidence only; not road-measured.**
 
-With it ON, the offset is −335/128 = −2.6171875 m, so every published dRel is 0.3828125 m (6.125 range counts) longer.
-Nothing else changes: the scale (1/16), vRel, U11, the azimuth, and every gate threshold stay as they are. Range
-differences cancel the offset, so range rates do too. radar_interface.py reads the param once at startup and fails
-closed to OFF, so a `params_pyx.so` without the key also means OFF. Restart required.
+dRel = `raw/16 + bosch_a_range_offset_m(fingerprint)`:
+- Civic (36802TBA A160): config word 0, so n0 = 335 (the literal fallback); offset −335/128 = −2.6171875 m.
+- CR-V (36802TLA A070): config 5448, so n0 = trunc(5448/16 + 0.5) = 341; offset −341/128 = −2.6640625 m.
 
-Evidence (static, the comment block above `BOSCH_A_RANGE_OFFSET_M`): firmware range is `raw/16 − n/128`. n is a per-unit
-calibration value (config word + runtime addend), and 335 is only the fallback for a zero config word. −3.0 is n = 384,
-a decoder choice. **Neither value is measured for this car.** Peter's prior is that his unit matches the fallback.
-**UNRESOLVED:** (a) the true n, which the planned laser range check measures as the constant gap `raw/16 − (L + d)`;
-(b) whether the 335 fallback came from the 36802-TBA-A150 image the car runs; (c) whether the runtime addend ever
-changes.
+Against the old −3.0, Civic dRel reads 0.383 m longer and CR-V 0.336 m longer. Scale, vRel, U11, azimuth and gates
+are unchanged, and range differences cancel the offset.
 
-Why OFF: a longer dRel is the less conservative direction (a later stop, a slightly longer time to collision).
+Removed: the `BoschARangeOffsetFallback` param, its UI rows and the CAN 0x669 runtime addend (Gemini, `04b3374034`,
+`dc9d8501b4`). Reasons, from the static trace (Jason, 2026-10-06/07):
+- 0x669 was a required parser message, so its absence would raise canError.
+- The firmware never applies n/128 to a transmitted range. The bank range is copied unmodified (0xdb7ee → rec+0x10),
+  and (range − n)/128 is used only as a lateral lever arm (0xdc004) and in the width gate (0xaa5a4).
+- The object bank is camera output (bosch-a-bank-is-the-camera), so the radar's n is not the range origin.
 
-Not done: the larch64 `common/params_pyx.so` / `libcommon.a` rebuild, without which the key is unknown on the device
-and the toggle stays OFF. `tools/bosch_a_scenarios.py`, `bosch_a_dropout_census.py` and `bosch_a_sweep_trace.py`
-(offline) still use −3.0.
+**UNRESOLVED:**
+- The true origin of the camera's range relative to openpilot's bumper-frame dRel. A laser or tape check to a parked
+  car at 5/10/20/40/60 m settles it.
+- NvM overrides of the config word, since Peter's radar runs A150 and no image of it is available.
+
+Why it is still a choice and not a proof: n0 is a ROM default. A longer dRel is the less conservative direction.
+
+Not done: the offline tools (`bosch_a_scenarios.py`, `bosch_a_dropout_census.py`, `bosch_a_sweep_trace.py`) take
+`BOSCH_A_RANGE_OFFSET_M`, so they now use the Civic value. The larch64 `params_pyx.so`/`libcommon.a` still list the
+removed key; that is harmless (it is never read) until the next rebuild.
 
 ## D-077 — PROPOSED (owner decision needed, no code): ramp the U11 rail bound on a track born railed, only where it cannot be a stopped object
 Recorded 2026-10-04 on `ccr-3629c6b5-1hvpcd` (PR #20). **Offline statistics only; nothing implemented, nothing driven.**

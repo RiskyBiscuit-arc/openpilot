@@ -198,7 +198,8 @@ BOSCH_A_U11_SCALE_MPS = BOSCH_A_DIRECT_VREL_SCALE_MPS
 BOSCH_A_U11_LOW_RAIL_MPS = (BOSCH_A_DIRECT_VREL_MIN_RAW - BOSCH_A_DIRECT_VREL_CENTER_RAW) * BOSCH_A_U11_SCALE_MPS
 BOSCH_A_U11_HIGH_RAIL_MPS = (BOSCH_A_DIRECT_VREL_MAX_RAW - BOSCH_A_DIRECT_VREL_CENTER_RAW) * BOSCH_A_U11_SCALE_MPS
 
-# D-077 (PROPOSED, both switches OFF; replay comparison only, not driven). The Bosch-A bank is the camera tracker
+# D-077, both ramps always on for Bosch-A (owner, 2026-10-07: remove the Birth-Rail Ramps toggle, bake in the
+# revised version). The Bosch-A bank is the camera tracker
 # (STATUS 205) and U11 its low-pass velocity state. A track whose U11 is railed within BIRTH_RAIL_WINDOW_S of its
 # first update is "born railed"; while U11 stays on that rail the published vRel ramps toward the rail as
 # rail * (1 - e^(-age/TAU)), normalised to reach the full rail at BIRTH_RAIL_RAMP_MAX_AGE_S. Evidence
@@ -207,18 +208,41 @@ BOSCH_A_U11_HIGH_RAIL_MPS = (BOSCH_A_DIRECT_VREL_MAX_RAW - BOSCH_A_DIRECT_VREL_C
 #   HIGH (option 1): +12 births publish LESS opening than the rail. More-closing direction (D-042), so it can only
 #     add braking or remove acceleration; 91% of +12 births were spin-up.
 #   LOW (option 2): -12 births publish LESS closing than the rail, which narrows D-041. Only while ego >= 12 m/s
-#     and the track's own range fit says the target moves at >= BIRTH_RAIL_LOW_MIN_LEAD_MPS; the published closing
-#     is the larger of the ramp and the range fit, never past the rail, and RAIL_FAST is withheld meanwhile. The
-#     full rail is published until the first range fit (~0.3 s), so the ramp can step to less closing then. The
-#     first update that fails a condition ends the ramp for good (full rail, as today).
-# aLeadK stays native (D-053 note). Bosch-A only: nothing turns these on outside replays and tests.
-BIRTH_RAIL_RAMP_HIGH = False
-BIRTH_RAIL_RAMP_LOW = False
+#     and a confident model lead (prob >= 0.5) sits at the track's range (max(5 m, 15%)) and lateral offset (2 m)
+#     and moves at >= BIRTH_RAIL_LOW_MIN_LEAD_MPS with a closing >= MARGIN short of the rail; the published
+#     closing is the larger of the ramp and the model's, never past the rail, and RAIL_FAST is withheld meanwhile.
+#     The first update that fails a condition ends the ramp for good (full rail, as today). Revised 2026-10-04
+#     (STATUS 207): the first version tested the track's own range fit, which at age 0.26-0.47 s read 20-52 m/s of
+#     closing on every replayed moving birth, so it never fired. Replay of the revised LOW: one firing in ~116 engaged
+#     min (268 5:56 cut-in, -1.58 vs -1.84); stopped-object stops 2d9 8:58, 26b 29:58, 236 34:57 unchanged.
+# aLeadK stays native (D-053 note). Bosch-A only: the model lead is only built for the Bosch-A bank.
+BIRTH_RAIL_RAMP_HIGH = True
+BIRTH_RAIL_RAMP_LOW = True
 BIRTH_RAIL_WINDOW_S = 0.5
 BIRTH_RAIL_RAMP_TAU_S = 1.2
 BIRTH_RAIL_RAMP_MAX_AGE_S = 2.5
 BIRTH_RAIL_LOW_MIN_V_EGO_MPS = 12.0
 BIRTH_RAIL_LOW_MIN_LEAD_MPS = 5.0
+BIRTH_RAIL_LOW_VISION_MIN_PROB = 0.5
+BIRTH_RAIL_LOW_VISION_D_TOL_M = 5.0
+BIRTH_RAIL_LOW_VISION_D_TOL_FRAC = 0.15
+BIRTH_RAIL_LOW_VISION_Y_TOL_M = 2.0
+# The model must also put the closing at least this far short of the rail. Replay 2d5 9:44 (only case): a lead at
+# ~100 m moving ~4 m/s by the range history (closing ~12.5) read 5-7 m/s on the model, so without the margin the ramp
+# published 10.4-11.9 of closing, less than the truth, for 2.4 s. A model closing near the rail gains nothing anyway.
+BIRTH_RAIL_LOW_VISION_MARGIN_MPS = 4.0
+
+
+def birth_rail_vision_agrees(d_rel: float, y_rel: float, vision_lead: tuple[float, float, float, float] | None) -> bool:
+  """D-077 LOW moving test: a confident model lead at the track's range and lateral offset, moving >= MIN_LEAD."""
+  if vision_lead is None:
+    return False
+  vd, vy, vv, prob = vision_lead
+  if not (math.isfinite(vd) and math.isfinite(vy) and math.isfinite(vv)) or prob < BIRTH_RAIL_LOW_VISION_MIN_PROB:
+    return False
+  if abs(vd - d_rel) > max(BIRTH_RAIL_LOW_VISION_D_TOL_M, BIRTH_RAIL_LOW_VISION_D_TOL_FRAC * d_rel):
+    return False
+  return abs(vy - y_rel) <= BIRTH_RAIL_LOW_VISION_Y_TOL_M and vv >= BIRTH_RAIL_LOW_MIN_LEAD_MPS
 
 
 def birth_rail_ramp_fraction(age: float) -> float:
@@ -473,10 +497,19 @@ YOUNG_TRACK_VISION_RANGE_MARGIN_M = 5.0
 # cannot be confused with at vEgo ~20). The vRel agreement (3.0, the D-043 rate-check tolerance) keeps a coasted
 # U11 that disagrees with its own range out. Replay evidence only; not road-validated.
 # Built in on for Bosch-A (owner, 2026-10-03; was the BoschANewbornLeads toggle): main() calls set_bosch_a_newborn_leads().
+# 2026-10-07 (owner chose "option 2" after James's PR #17 review): for a never-measured newborn the vRel agreement was
+# circular -- its published vRel IS radar_interface's fit of the same ranges -- so it now applies only once the track
+# has a measured (U11) update. A never-measured newborn instead must not close more than
+# NEWBORN_RANGE_CLOSING_STATIONARY_TOL faster than a stopped object at ego's wheel speed (independent of the radar):
+# an in-lane lead cannot, and James found 42.7% of newborn range slopes did. 000002ae 17 track 39, the case this
+# exemption exists for, fit ~-23 at vEgo 19.8 (3.2 past stationary), so the margin is 5. Position is confirmed by the
+# camera at both call sites: track_matches_vision also needs dist_sane/lat_sane, and the FAR_RAIL floor exists only
+# with a model lead at the track's range. Static tests only.
 NEWBORN_RANGE_CLOSING_EXEMPT = True
 NEWBORN_RANGE_CLOSING_MIN_RATE = -8.0     # m/s; the range slope must be at or below this
 NEWBORN_RANGE_CLOSING_EGO_FRAC = 0.5      # ... and at or below -this * vEgo
-NEWBORN_RANGE_CLOSING_VREL_TOL = 3.0      # m/s; |slope - track.vRel| at most this
+NEWBORN_RANGE_CLOSING_VREL_TOL = 3.0      # m/s; |slope - track.vRel| at most this, once the track has a measured update
+NEWBORN_RANGE_CLOSING_STATIONARY_TOL = 5.0  # m/s; the slope may close at most this much faster than -vEgo
 
 # Newborn KF follows its own range (REPLAY ONLY, no DECISIONS entry yet). The Track KF starts at the first published
 # vLead and only updates on a measurement_update, which on Bosch-A needs pt.measured; a newborn published unmeasured
@@ -630,24 +663,6 @@ def set_bosch_a_newborn_leads(enabled: bool) -> None:
 
 
 
-def bosch_a_birth_rail_ramp_high_enabled() -> bool:
-  try:
-    return bool(Params().get_bool("BoschABirthRailRamps"))
-  except Exception:
-    return False
-
-def bosch_a_birth_rail_ramp_low_enabled() -> bool:
-  try:
-    return bool(Params().get_bool("BoschABirthRailRamps"))
-  except Exception:
-    return False
-
-def bosch_a_range_kf_enabled() -> bool:
-  try:
-    return bool(Params().get_bool("BoschARangeKF"))
-  except Exception:
-    return False
-
 def is_bosch_a_radar_car(CP) -> bool:
   return CP.brand == "honda" and CP.carFingerprint in HONDA_BOSCH_A and not CP.radarUnavailable
 
@@ -697,7 +712,8 @@ def young_track_vision_contradicts(lead, vis, v_ego: float) -> bool:
 
 def young_range_genuinely_closing(track, v_ego: float) -> bool:
   """NEWBORN_RANGE_CLOSING_EXEMPT: True when this young track's own fresh-sweep range history since birth fits a clean
-  line that closes clearly (see the constant block) and its published vRel agrees with that line. Caller gates Bosch-A."""
+  line that closes clearly but no faster than a stopped object allows, and, once measured, its U11 vRel agrees with that
+  line (see the constant block). Caller gates Bosch-A."""
   if not NEWBORN_RANGE_CLOSING_EXEMPT or track is None:
     return False
   if not (track.t_last - track.t_first <= YOUNG_TRACK_MAX_AGE_S) or len(track.young_range_hist) < YOUNG_TRACK_MIN_SAMPLES:
@@ -712,6 +728,10 @@ def young_range_genuinely_closing(track, v_ego: float) -> bool:
     return False
   if not (slope <= NEWBORN_RANGE_CLOSING_MIN_RATE and slope <= -NEWBORN_RANGE_CLOSING_EGO_FRAC * float(v_ego)):
     return False
+  if slope < -(float(v_ego) + NEWBORN_RANGE_CLOSING_STATIONARY_TOL):
+    return False
+  if track.cnt == 0:
+    return True  # never measured: vRel is the fit of these same ranges, so comparing them proves nothing
   return abs(float(slope) - float(track.vRel)) <= NEWBORN_RANGE_CLOSING_VREL_TOL
 
 
@@ -955,7 +975,7 @@ class Track:
       while self.cam_hist and self.cam_hist[0][0] < t_cam - RANGE_VREL_CAM_XRATE_WINDOW_S:
         self.cam_hist.popleft()
     self._update_range_assist(range_assist, measurement_update, t_now, vision_closing, vision_assist)
-    self._update_birth_rail(t_now)
+    self._update_birth_rail(t_now, vision_lead)
 
     if measurement_update:
       self._update_rail_range_inconsistent()
@@ -1223,11 +1243,12 @@ class Track:
         correction = min(correction, max(self.vRel + cam_closing + RANGE_VREL_CAM_XRATE_MARGIN_MPS, 0.0))
     self.range_assist_correction = correction
 
-  def _update_birth_rail(self, t_now: float) -> None:
+  def _update_birth_rail(self, t_now: float, vision_lead: tuple[float, float, float, float] | None = None) -> None:
     """D-077: track the born-railed state and set birth_rail_vrel (None unless a ramp is active). Must run after
-    _update_range_assist; the LOW ramp withholds RAIL_FAST by zeroing range_assist_correction."""
+    _update_range_assist; the LOW ramp withholds RAIL_FAST by zeroing range_assist_correction. vision_lead is the
+    model lead as (dRel, yRel, vLead, prob) in radar coordinates, or None."""
     self.birth_rail_vrel = None
-    if self.birth_rail_done or not (bosch_a_birth_rail_ramp_high_enabled() or bosch_a_birth_rail_ramp_low_enabled()):
+    if self.birth_rail_done or not (BIRTH_RAIL_RAMP_HIGH or BIRTH_RAIL_RAMP_LOW):
       return
     age = float(t_now) - self.t_first
     on_low = self.vRel <= BOSCH_A_U11_LOW_RAIL_MPS + BOSCH_A_U11_SCALE_MPS / 2
@@ -1244,25 +1265,23 @@ class Track:
       return
     frac = birth_rail_ramp_fraction(age)
     if self.birth_rail > 0:
-      if not bosch_a_birth_rail_ramp_high_enabled():
+      if not BIRTH_RAIL_RAMP_HIGH:
         self.birth_rail_done = True
         return
       # Less opening than the rail: the more-closing direction, combined with any range assist below.
       self.birth_rail_vrel = min(float(self.vRel) - float(self.range_assist_correction), BOSCH_A_U11_HIGH_RAIL_MPS * frac)
       return
     v_ego_aligned = self.vLead - self.vRel
-    fit = self.vRelRangeFresh and math.isfinite(self.vRelRange)
-    if not bosch_a_birth_rail_ramp_low_enabled() or v_ego_aligned < BIRTH_RAIL_LOW_MIN_V_EGO_MPS:
+    if not BIRTH_RAIL_RAMP_LOW or v_ego_aligned < BIRTH_RAIL_LOW_MIN_V_EGO_MPS or \
+       not birth_rail_vision_agrees(self.dRel, self.yRel, vision_lead):
       self.birth_rail_done = True
       return
-    if not fit and not self.birth_rail_ramping and age <= BIRTH_RAIL_WINDOW_S:
-      # No range fit yet (5 sweeps, ~0.3 s): publish the full rail and decide once the fit exists.
-      return
-    if not fit or v_ego_aligned + self.vRelRange < BIRTH_RAIL_LOW_MIN_LEAD_MPS:
+    vision_vrel = float(vision_lead[2]) - v_ego_aligned
+    if vision_vrel < BOSCH_A_U11_LOW_RAIL_MPS + BIRTH_RAIL_LOW_VISION_MARGIN_MPS:
       self.birth_rail_done = True
       return
     self.birth_rail_ramping = True
-    self.birth_rail_vrel = max(BOSCH_A_U11_LOW_RAIL_MPS, min(BOSCH_A_U11_LOW_RAIL_MPS * frac, float(self.vRelRange)))
+    self.birth_rail_vrel = max(BOSCH_A_U11_LOW_RAIL_MPS, min(BOSCH_A_U11_LOW_RAIL_MPS * frac, vision_vrel))
     self.range_assist_correction = 0.0
 
   def _update_rail_range_inconsistent(self) -> None:
@@ -1821,6 +1840,15 @@ class RadarD:
       if ids not in ar_pts:
         self.tracks.pop(ids, None)
 
+    # D-077 LOW: model lead in radar coordinates for the born-railed moving test (Bosch-A, switch on only).
+    birth_vision = None
+    if BIRTH_RAIL_RAMP_LOW and self.honda_bosch_a_radar and len(sm['modelV2'].leadsV3) and \
+       len(sm['modelV2'].leadsV3[0].x):
+      lv = sm['modelV2'].leadsV3[0]
+      mv = sm['modelV2'].velocity.x[0] if len(sm['modelV2'].velocity.x) else self.v_ego
+      birth_vision = (float(lv.x[0]) - RADAR_TO_CAMERA, -float(lv.y[0]), self.v_ego + float(lv.v[0]) - float(mv),
+                      float(lv.prob))
+
     # *** compute the tracks ***
     for ids, rpt in ar_pts.items():
       # align v_ego by a fixed time to align it with the radar measurement
@@ -1845,8 +1873,8 @@ class RadarD:
                               range_assist=ids in lead_track_ids, vision_closing=vis_closing,
                               vision_assist=vision_assist, camera_sample=cam_sample,
                               nc_vrel=rpt[4], nc_valid=rpt[5], nc_sigma=rpt[6],
-                              newborn_follow=self.honda_bosch_a_radar and radar_fresh and not rpt[3]
-                              )
+                              newborn_follow=self.honda_bosch_a_radar and radar_fresh and not rpt[3],
+                              vision_lead=birth_vision)
 
     # ONPATH_RADAR_ADOPT: path offset of every track on a fresh sweep (yRel + = left, model y + = right)
     if ONPATH_RADAR_ADOPT and self.honda_bosch_a_radar and radar_fresh:

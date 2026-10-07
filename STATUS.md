@@ -1,6 +1,6 @@
 # Status
 
-**As of: 2026-10-06**
+**As of: 2026-10-07**
 
 Update the date above whenever this file changes. If it is stale, trust `git log` over this
 file.
@@ -21,7 +21,7 @@ here. Where the two touch — the CR-V lateral profile, the steering-ratio curve
 `extract_drives.py` lineage — that is recorded below as a cross-reference only.
 
 **Open topics to revisit** (parked by decision, not closed):
-- **Range offset −2.617 m toggle: D-076 (`BoschARangeOffsetFallback`, TEST, default OFF).** Static only, not driven. ON uses the radar firmware's fallback offset (−335/128) instead of −3.0, so every dRel reads 0.383 m longer; vRel and U11 are unchanged. Neither offset is measured for this car; the laser range check settles it. The larch64 params artifacts need a rebuild before the key exists on the device.
+- **Range offset: D-076 ACCEPTED 2026-10-07, fixed per car, no toggle.** Firmware ROM default −335/128 = −2.617 m (Civic) and −341/128 = −2.664 m (CR-V), replacing −3.0. The `BoschARangeOffsetFallback` toggle and the CAN 0x669 addend are removed. Static only; the true range origin is unmeasured, and the laser range check settles it.
 - **Newborn radar points: D-075, built in ON since 2026-10-03 (the `BoschANewbornLeads` toggle is removed).** Replay and static only, limited road evidence from Peter's drives with the toggle on. Publishes young closing radar points earlier and lets one lead only once its own range closes.
 - **U11 scale 1/72: D-074 ACCEPTED (owner, 2026-10-02), built in; the 1/64 switch back was removed 2026-10-03.**
   Static and replay only, not driven. Rails ±12.0 m/s; every closing speed published is 64/72 of the old 1/64 reading (−11.1 %), the D-041 danger
@@ -10932,3 +10932,41 @@ and contributor docs to use plain python3 commands from eps_tools/. PYTHONPATH
 is retained as an optional import-error workaround, not normal setup. Local
 root-document source matches publication. Documentation only; whitespace checks
 passed. No runtime tests or hardware validation were performed.
+
+## 234. Tried and dropped: capping how fast the model lead path lets the lead speed up (2026-10-07). Owner: "Yeah drop it, move on to a different approach". Closed-loop replay only; never pushed or driven.
+- **Symptom (routes 2ed–2f1, dongle 11c8fa231c0499ed, pr10 1dcd1a47d).** In town traffic the car follows too close (0.55–0.9x the follow distance), then brakes about -2.3 when the lead brakes, stays slow, then speeds up again.
+- **What was tried.** In `build_model_lead_trajectory`, the model's future lead speed-up was capped at raw vLead + (max(aLeadK, 0) + 0.2) * t. The idea came from the logged horizon-end lead speed of 12–14 m/s while vLead was 6–10.
+- **Why it did nothing.** The radar's aLeadK was itself about +0.6 m/s² in those approaches (2ed 21:34: 0.68 at +4 s, 0.59 at +8 s). So the cap's ceiling was about 17–18 m/s and almost never bound. The model was not inventing the speed-up; the lead really was accelerating.
+- **Replay (Job, SimCar, 61 approach events, base 659d9e074 vs fix).** Gap, peak brake and hard-brake counts were unchanged at the median and p10/p90. Undershoot and slow time grew in 9 events and fell in 1. Launches reached 4 m/s up to 0.5 s later. No event was newly below 0.5x the follow distance.
+- **Where the gap really goes (2ed 21:34 logged).** The lead pulls away at about +0.6 m/s², and ours commands about +1.3 for about 6 s at a gap of 1.0–1.1x. Ego ends up about 1 m/s faster than the lead and the gap closes to 0.7x before the lead brakes. The next approach is a true coast in that situation: drop the gas, then let the StockBrakeFeel brake take over when needed.
+
+## 235. StockBrakeFeel lead coast: stop speeding up, then coast, while closing on a lead (2026-10-07). Owner: "approach the solution as more like a true coast, like kill accel all together then resuming the stock brake feel brake when appropriate", "match stock as much as you can", and pick "the one that uses the least amount of unnecessary brake and jerk, maximize coasting, and the most gas efficient". Closed-loop replay only; not driven. Pushed to ns-bosch-radar-testing ff26d708d, ns-bosch-radar-testing-pr10-smooth a9c7d285c, IQ-Navigation-Port 3c83f4ac7.
+- **What changed.** `lead_coast_wanted` / `lead_coast_ceiling` in `longitudinal_planner.py`, only inside the existing StockBrakeFeel block (no new toggle). Hold (target ceiling 0) while a lead closes faster than 0.5 m/s inside 2x the follow distance; coast (ceiling = coast accel, clipped -0.5..0) inside 1.5x, or when matching speeds by the follow distance needs > 0.07 m/s^2; ends when the closing falls under 0.1 m/s or the gap opens past 2.25x. Gas fades at 0.75 m/s^3, returns at 1.0; a brake from the coast builds at 1.0 m/s^3 while barely closing. Only ever lowers throttle.
+- **Pick (Job, closed-loop SimCar, 61 lead events on 2ed-2f1, StockBrakeFeel on in all arms).** Seven arms; NEAR 1.5 won on the owner's criteria: brake work 672 J/kg (base 722), hard-brake events/frames 4/131 (8/187), peak p10 -1.47 (-2.19), gap p10 0.78x (0.61x), gas while closing 5.0 s (18.6), gas work 95 J/kg/km (95), cmd jerk p90 rise/fall 2.5/3.1 (2.6/4.8). A 0.6 m/s^3 gas return braked again at ed 21:34.9 (-1.63, 7.3 s slow vs -0.30, 2.0 s). The stock-fit arm (hold 1.25x, need 0.21, near 1.0) kept 17.3 s of gas while closing and peak p10 -1.91. Not fixed by any arm: f0 11:10.6 and ee 3:46.8 (-2.2..-2.3 in all).
+- **Stock ACC study (logged, 14 stock routes; firmware static).** Gas-off-no-brake is 10% of stock frames but 0.2% once set-speed-bound and ICBM-press frames are dropped (Job Request E, Jason's fit); while following stock goes from gas to a light brake request at about 0.93x follow / closing 0.5 m/s (n=110). In the A160 radar firmware the GAS_COMMAND -30000 sentinel is gated on button and CAN flag bits (0x296 DECEL_SET verified as an FSM input), with no gap/TTC math found (Jason, static; a 0x291 band classifier is unresolved). So this is not a copy of a stock coast; it borrows stock's let-off timing and ramps.
+- **Open-loop agreement with stock (Job, 13 of 14 stock-ACC routes, 299 not run; command replay, not brake delivery).** Arms barely separate: CLEAN frames (setv-v >= 0.5, no ICBM press in 3 s; 20.4 min) base = v2 = v4b = v5b = v6b at 86.7% band agreement (gas 92%, coast 11%, light brake 49%, brake 95%); ALL frames 66.3% for every arm. Raw a differs up to ~1.0 m/s^2 (266), but bands rarely change: open loop, the ego holds stock's gap, so the coast gate seldom trips. The longest CLEAN disagreements (266 9:51-11:54, 262 4:04, at 26-36 m closing 0.2-1.1 m/s) are stock on light gas or coast where ours is at coast or light brake, so ours lets off earlier than stock there. v7/v8 were not in this run. Onset timing has too few CLEAN events to read.
+- **Open.** Needs a drive: gap, slow time behind the lead, and whether the coast feels like a coast.
+
+## 236. Synced Trung `ns-bosch-radar-testing` through `e38b2cc1e` into `ns-bosch-updated` (2026-10-07).
+
+- `[CONFIRMED git]` The exact incoming tip is
+  `e38b2cc1ee0a6e1e65e8efb9cb4719539492cb35`; it is integrated by merge, not rebase.
+  The six existing unpublished EPS-tools commits and all earlier CR-V controller, NovaSpark,
+  UI/button-event, and VFN calibration work remain in the combined history.
+- Incoming behavior includes the fixed per-car Bosch-A ROM-default range offsets, newborn
+  closing correction, built-in birth-rail ramp and mid-band over-brake compensation, current
+  Accel Boost/lead-departure behavior, StockBrakeFeel lead coasting, and C4 adjacent-lane/blind-
+  spot rendering. STATUS 234/235 preserve Trung's colliding STATUS 222/223 entries without
+  overwriting the existing CR-V records.
+- `[CONFIRMED unit test]` The complete Honda/opendbc suite passes: 407 tests. The focused
+  Accel Boost suite passes: 7 tests. Ruff passes for the changed Honda radar files and the
+  isolated changed Accel Boost, radard, newborn-radar, C4 renderer/test, and scheduler-tool
+  files; Python compilation passes for the changed runtime modules.
+- `[CONFIRMED integration fix]` Trung's new `tools/ui_core_sched_bench.py` omitted its
+  `multiprocessing`, `os`, `sys`, and `time` imports and could not run. The merge adds those
+  imports and reformats the tool so focused Ruff and compilation pass. The benchmark itself
+  requires Linux scheduler APIs and was not executed on this Apple-silicon host.
+- The radard/longitudinal/UI pytest groups could not collect locally because the tracked
+  `msgq` and UI dependencies are Linux/aarch64 artifacts. This is not counted as a pass.
+  No live radar, vehicle timing, changed closed loop, UI rendering, or road validation was
+  performed during this sync.

@@ -182,3 +182,112 @@ def test_stock_feel_depth_table_is_monotone():
   assert all(a < b for a, b in zip(lp.STOCK_FEEL_DEPTH_BP[:-1], lp.STOCK_FEEL_DEPTH_BP[1:], strict=True))
   assert all(a <= b for a, b in zip(lp.STOCK_FEEL_DEPTH_V[:-1], lp.STOCK_FEEL_DEPTH_V[1:], strict=True))
   assert lp.STOCK_FEEL_DEPTH_V[0] <= -3.5 and len(lp.STOCK_FEEL_DEPTH_BP) == len(lp.STOCK_FEEL_DEPTH_V)
+
+
+# Coast to the lead (owner, 2026-10-07), part of the StockBrakeFeel toggle.
+def _clead(d, v_rel, v_lead, status=True):
+  return SimpleNamespace(status=status, dRel=d, vRel=v_rel, vLead=v_lead, aLeadK=0.0)
+
+
+def test_lead_coast_starts_when_closing_inside_two_follow_distances():
+  # 2ed 21:34-like: 10 m/s behind a 9 m/s lead at 15 m, follow distance 1.45 * 9 + 6 = 19 m
+  assert lp.lead_coast_wanted((_clead(15.0, -1.0, 9.0),), 10.0, 1.45, False)
+  assert lp.lead_coast_wanted((_clead(37.0, -1.0, 9.0),), 10.0, 1.45, False)      # 1.95x
+  assert not lp.lead_coast_wanted((_clead(39.0, -1.0, 9.0),), 10.0, 1.45, False)  # 2.05x
+  assert not lp.lead_coast_wanted((_clead(15.0, 0.5, 10.5),), 10.0, 1.45, False)  # lead pulling away
+  assert not lp.lead_coast_wanted((_clead(15.0, -0.3, 9.7),), 10.0, 1.45, False)  # barely closing
+  assert not lp.lead_coast_wanted((_clead(5.0, -1.0, 0.5),), 1.5, 1.45, False)    # creep: planner's
+  assert not lp.lead_coast_wanted((_clead(15.0, -1.0, 9.0, status=False),), 10.0, 1.45, False)
+
+
+def test_lead_coast_holds_speed_first_and_coasts_at_stocks_let_off_point():
+  H, C = lp.LEAD_COAST_HOLD, lp.LEAD_COAST_COAST
+  # follow distance 19 m (9 m/s lead); stock lets off the gas at closing p50 1.28 m/s inside 1.61x (0.07 m/s^2 needed)
+  assert lp.lead_coast_wanted((_clead(35.0, -1.0, 9.0),), 10.0, 1.45, 0) == H      # 1 m/s at 1.84x: stop speeding up
+  assert lp.lead_coast_wanted((_clead(30.0, -1.3, 9.0),), 10.0, 1.45, 0) == C      # 1.3 m/s at 1.58x: coast
+  assert lp.lead_coast_wanted((_clead(32.0, -1.3, 9.0),), 10.0, 1.45, 0) == H      # 1.68x: not yet
+  assert lp.lead_coast_wanted((_clead(18.0, -0.6, 9.0),), 10.0, 1.45, 0) == C      # inside the follow distance: coast
+  assert lp.lead_coast_wanted((_clead(28.0, -0.6, 9.0),), 10.0, 1.45, 0) == C      # slow closing at 1.47x: coast
+  assert lp.lead_coast_wanted((_clead(30.0, -0.6, 9.0),), 10.0, 1.45, 0) == H      # 1.58x: not yet
+  # once coasting it stays a coast until the closing ends, as stock does
+  assert lp.lead_coast_wanted((_clead(20.0, -0.3, 9.7),), 10.0, 1.45, C) == C
+  assert lp.lead_coast_wanted((_clead(20.0, -0.3, 9.7),), 10.0, 1.45, H) == H
+  assert lp.lead_coast_wanted((_clead(20.0, -0.05, 9.95),), 10.0, 1.45, C) == lp.LEAD_COAST_OFF
+
+
+def test_lead_coast_hold_ceiling_is_zero_not_the_coast():
+  dt = 0.05
+  c = None
+  prev = 0.6
+  for _ in range(40):
+    c = lp.lead_coast_ceiling(c, prev, lp.LEAD_COAST_HOLD, -0.3, dt)
+    prev = c
+  assert c == pytest.approx(0.0)
+  for _ in range(40):  # hold -> coast: falls on from 0 at the fade rate
+    nxt = lp.lead_coast_ceiling(c, c, lp.LEAD_COAST_COAST, -0.3, dt)
+    assert c - nxt <= lp.LEAD_COAST_FALL_JERK * dt + 1e-9
+    c = nxt
+  assert c == pytest.approx(-0.3)
+
+
+def test_lead_coast_holds_until_speeds_match():
+  assert lp.lead_coast_wanted((_clead(15.0, -0.3, 9.7),), 10.0, 1.45, True)
+  assert not lp.lead_coast_wanted((_clead(15.0, -0.05, 9.95),), 10.0, 1.45, True)
+  assert lp.lead_coast_wanted((_clead(41.0, -1.0, 9.0),), 10.0, 1.45, True)       # 2.16x, inside the exit ratio
+
+
+def test_lead_coast_ceiling_fades_the_gas_and_gives_it_back():
+  dt = 0.05
+  c = lp.lead_coast_ceiling(None, 1.3, lp.LEAD_COAST_COAST, -0.3, dt)
+  assert c == pytest.approx(1.3 - lp.LEAD_COAST_FALL_JERK * dt)
+  for _ in range(60):
+    c = lp.lead_coast_ceiling(c, c, lp.LEAD_COAST_COAST, -0.3, dt)
+  assert c == pytest.approx(-0.3)
+  assert lp.lead_coast_ceiling(None, 0.5, lp.LEAD_COAST_COAST, -2.0, 2.0) == pytest.approx(lp.LEAD_COAST_MIN)  # steep uphill: no brake
+  assert lp.lead_coast_ceiling(None, 0.5, lp.LEAD_COAST_COAST, lp.ACCEL_MAX, 2.0) == pytest.approx(0.0)       # no pitch: hold speed
+  c = lp.lead_coast_ceiling(-0.3, -1.0, lp.LEAD_COAST_OFF, -0.3, dt)  # braking below the coast: gas returns from the coast level
+  assert c == pytest.approx(-0.3 + lp.LEAD_COAST_RISE_JERK * dt)
+  for _ in range(200):
+    c = lp.lead_coast_ceiling(c, c, lp.LEAD_COAST_OFF, -0.3, dt)
+  assert c is None
+
+
+def test_lead_coast_gas_returns_smoothly_from_where_the_output_is():
+  # The planner held the output under the ceiling (e.g. a brief brake back up to -0.1): the gas comes back from there.
+  dt = 0.05
+  assert lp.lead_coast_ceiling(0.8, -0.1, lp.LEAD_COAST_OFF, -0.3, dt) == pytest.approx(-0.1 + lp.LEAD_COAST_RISE_JERK * dt)
+  # Each step of the returning gas is at most the rise rate, and the fade at most the fall rate.
+  c, prev = -0.3, -0.3
+  for _ in range(60):
+    c = lp.lead_coast_ceiling(c, prev, lp.LEAD_COAST_OFF, -0.3, dt)
+    if c is None:
+      break
+    assert c - prev <= lp.LEAD_COAST_RISE_JERK * dt + 1e-9
+    prev = c
+  c, prev = None, 1.2
+  for _ in range(40):
+    c = lp.lead_coast_ceiling(c, prev, lp.LEAD_COAST_COAST, -0.3, dt)
+    assert prev - c <= lp.LEAD_COAST_FALL_JERK * dt + 1e-9
+    prev = c
+
+
+def test_lead_coast_is_part_of_stock_brake_feel_and_only_lowers_the_target():
+  from pathlib import Path
+  src = Path(lp.__file__).read_text()
+  gate = src.index('if bool(getattr(starpilot_toggles, "stock_brake_feel", False)) and not reset_state')
+  use = src.index('output_a_target = min(output_a_target, self.lead_coast_ceiling)')
+  law = src.index('output_a_target = stock_feel_target((self.lead_one, self.lead_two)', gate)
+  assert gate < use < law
+
+
+def test_lead_coast_to_brake_builds_at_stock_rate_unless_close():
+  from pathlib import Path
+  src = Path(lp.__file__).read_text()
+  assert ("if brake_onset_ttc(leads, STOCK_FEEL_MIN_CLOSING) == float('inf') and brake_onset_ttc(leads) > STOCK_FEEL_TTC_FLOOR_S:\n"
+          "          output_a_target = brake_onset_limited_target(prev_output_a_target, output_a_target, self.dt, LEAD_COAST_BRAKE_JERK)") in src
+  # coasting at -0.3, barely closing (0.3 m/s at 15 m): a -1.5 planner brake builds at 1 m/s^3 from the coast level
+  assert lp.brake_onset_limited_target(-0.3, -1.5, 0.05, lp.LEAD_COAST_BRAKE_JERK) == pytest.approx(-0.35)
+  assert lp.brake_onset_ttc((_lead(15.0, -0.3),)) > lp.STOCK_FEEL_TTC_FLOOR_S
+  assert not lp.brake_onset_ttc((_lead(3.0, -2.0),)) > lp.STOCK_FEEL_TTC_FLOOR_S  # 1.5 s: planner depth, no limit here
+  # closing faster than 0.5 m/s: the stock law's own TTC rate applies instead (2 m/s^3 at TTC 2.5 s), not 1 m/s^3
+  assert lp.brake_onset_ttc((_lead(5.0, -2.0),), lp.STOCK_FEEL_MIN_CLOSING) != float('inf')

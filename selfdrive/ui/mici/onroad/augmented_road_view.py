@@ -48,6 +48,7 @@ WIDE_CAM = VisionStreamType.VISION_STREAM_WIDE_ROAD
 DRIVER_CAM = VisionStreamType.VISION_STREAM_DRIVER
 GEAR_SHIFTER_REVERSE = structs.CarState.GearShifter.reverse
 DEFAULT_DEVICE_CAMERA = DEVICE_CAMERAS["tici", "ar0231"]
+TRAFFIC_BORDER_SCALE = 2.5
 
 CAMERA_VIEW_AUTO = 0
 CAMERA_VIEW_DRIVER = 1
@@ -851,13 +852,21 @@ class AugmentedRoadView(CameraView):
     rl.draw_rectangle_rounded_lines_ex(border_rect, 0.12, 16, border_size, border_color)
 
     if (colors := get_traffic_border_colors()) is not None:
+      # Blind spot / signal border is drawn thicker than the status border so it is easy to see.
+      traffic_size = border_size * TRAFFIC_BORDER_SCALE
+      traffic_rect = rl.Rectangle(
+        self._content_rect.x + traffic_size / 2,
+        self._content_rect.y + traffic_size / 2,
+        self._content_rect.width - traffic_size,
+        self._content_rect.height - traffic_size,
+      )
       for x, w, color in (
-        (border_rect.x, border_rect.width / 2, colors[0]),
-        (border_rect.x + border_rect.width / 2, border_rect.width - border_rect.width / 2, colors[1]),
+        (traffic_rect.x, traffic_rect.width / 2, colors[0]),
+        (traffic_rect.x + traffic_rect.width / 2, traffic_rect.width - traffic_rect.width / 2, colors[1]),
       ):
         if color.a > 0:
-          rl.begin_scissor_mode(int(x), int(border_rect.y), int(w), int(border_rect.height))
-          rl.draw_rectangle_rounded_lines_ex(border_rect, 0.12, 16, border_size, color)
+          rl.begin_scissor_mode(int(x), int(traffic_rect.y), int(w), int(traffic_rect.height))
+          rl.draw_rectangle_rounded_lines_ex(traffic_rect, 0.12, 16, traffic_size, color)
           rl.end_scissor_mode()
 
     rl.end_scissor_mode()

@@ -390,6 +390,57 @@ STOCK_FEEL_MIN_CLOSING = 0.5  # m/s
 # a simulated gap crossed TTC 2 s or a lead began opening (e5 -11.9, dfa -33, dfb -15 m/s^3). Stock's own p98 rate is
 # 2-3.4 m/s^3 at every TTC; 5 reaches -3.5 from -1.85 in 0.33 s.
 STOCK_FEEL_JERK_OUTSIDE = 5.0  # m/s^3
+# Coast to the lead, part of the StockBrakeFeel toggle (owner, 2026-10-07: "approach the solution as more like a true
+# coast, like kill accel all together then resuming the stock brake feel brake when appropriate"). Logged routes
+# 2ed-2f1 (STATUS 234): in town the planner kept +0.1..+0.6 of throttle while already closing on the lead at 0.9-1.3 m/s
+# (2ed 21:34: gap 1.0x -> 0.7x the follow distance), so when the lead then braked at -3 the car met it at -2.3 from
+# too close. Copied from stock ACC (Job, 2026-10-07: ACC_CONTROL 0x1DF on 14 stock-ACC routes, 303 closing episodes;
+# logged data, limited road evidence). Stock does not coast as soon as it closes: while closing it is 46% on the gas
+# (with ACCEL_COMMAND near 0, p10/50/90 -0.19/0.00/+0.28 at let-off), 12% coasting (gas -30000, no brake) and 35%
+# braking. Two steps here, both only lowering throttle:
+#   hold  - a lead closing faster than LEAD_COAST_ENTER_CLOSING inside LEAD_COAST_GAP_RATIO follow distances: the
+#           target may go no higher than 0 (no more speeding up; this alone removes the 2ed +0.6 throttle).
+#   coast - shedding the closing speed before the gap reaches the follow distance takes more than LEAD_COAST_NEED
+#           (closing^2 / (2 * (dRel - follow distance))). Stock lets off at closing p50 1.28 m/s and gap p50 1.61x,
+#           0.07 m/s^2 at the 19 m follow distance of 9 m/s. Inside LEAD_COAST_NEAR_RATIO any closing above
+#           LEAD_COAST_ENTER_CLOSING coasts: holding speed never sheds a slow closing (replay, a 1.3 m/s / 1.6x entry and
+#           a 0.07 m/s^2 one alone: f0 11:10.6 held at 0 down to 0.42x and braked at -2.3, as base did). The ceiling is
+#           the coast accel (gas off; clipped to LEAD_COAST_MIN..0; stock's coast ACCEL_COMMAND p50 -0.39) until the
+#           coast ends.
+# Stock itself barely coasts while following: with its set speed out of the way (no set-speed bind, no ICBM press in
+# the last 3 s) gas-off-no-brake is 0.2% of frames and it eases off with a light brake request instead (Job/Jason
+# 2026-10-07, 14 stock routes; its firmware gates the gas-off sentinel on button and CAN flag bits only, static). The
+# ratios here were picked on closed-loop replay of 61 lead events on 2ed-2f1 (Job, an7, StockBrakeFeel on), owner's
+# criteria: least needless braking and jerk, most coasting, least gas. NEAR 1.5 against 1.25 / 2.0 and stock-fit
+# ratios (hold 1.25x, need 0.21, near 1.0): brake work 672 J/kg (base 722, 1.25x 679, 2.0x 675, stock-fit 719), hard
+# brake events/frames 4/131 (base 8/187, 1.25x 5/159, stock-fit 7/169), peak p10 -1.47 (base -2.19), gap p10 0.78x
+# (base 0.61), gas while closing 5.0 s (base 18.6, stock-fit 17.3), gas work 95 J/kg/km (base 95), cmd jerk p90
+# 2.5/3.1 (base 2.6/4.8). Replay only.
+# Both end once the closing falls under LEAD_COAST_EXIT_CLOSING (stock gives the gas back at closing p50 0.03 m/s,
+# 0.64 s after the speeds match, gap 1.53x: no hysteresis on the gap to speak of) or the gap opens past
+# LEAD_COAST_GAP_RATIO_EXIT. Owner: "resume for coast back to braking or accelerating should feel smooth and not
+# sudden. Keeping that stock acc feel". Stock fades its gas over 0.8 s (p50) and its coast ACCEL ramps at about
+# 0.3 m/s^3, so the ceiling falls at LEAD_COAST_FALL_JERK; it rises back at LEAD_COAST_RISE_JERK (a ceiling, the
+# planner's own target sets the actual return; stock's gas return after a coast, n=212: steepest 0.5 s slope p50 0.34
+# / p90 0.64 m/s^3, net over 2 s p50 0.10; 0.6 made the planner brake again at ed 21:34.9, -1.63 with 7.3 s slow
+# against -0.30 / 2.0 s at 1.0 on replay). While holding, stock's ACCEL on the gas while closing is p50 0.00 (p90 0.37),
+# so the hold ceiling is 0. A brake from the coast starts at the coast level and deepens at stock's
+# rate: stock_feel_target's while the lead closes faster than STOCK_FEEL_MIN_CLOSING, and LEAD_COAST_BRAKE_JERK below
+# that (stock coast -> brake: 0.45 p50 / 0.95 p90 m/s^3 over the first 1 s, n=19), unless any closing lead is inside
+# STOCK_FEEL_TTC_FLOOR_S. It only ever lowers throttle: any braking target passes through to the stock brake law above.
+# Replay (Job, 61 events) of the first version, which coasted from 0.5 m/s at 2x: gas while closing 18.6 -> 2.4 s,
+# 2ed 21:34 gap 0.47x -> 0.93x, but 2-3 s more time below the lead's speed in ~6 events; hence the two steps. Static only.
+LEAD_COAST_ENTER_CLOSING = 0.5  # m/s
+LEAD_COAST_EXIT_CLOSING = 0.1  # m/s
+LEAD_COAST_GAP_RATIO = 2.0  # x (t_follow * vLead + 6 m)
+LEAD_COAST_GAP_RATIO_EXIT = 2.25
+LEAD_COAST_NEED = 0.07  # m/s^2, decel needed to match speeds at the follow distance; stock's let-off point (p50)
+LEAD_COAST_NEAR_RATIO = 1.5  # x the follow distance; inside it any closing above LEAD_COAST_ENTER_CLOSING coasts
+LEAD_COAST_MIN_SPEED = 2.0  # m/s; below this stop-and-go creep is left to the planner
+LEAD_COAST_MIN = -0.5  # m/s^2, deepest coast (uphill); a real brake is the planner's and the stock law's
+LEAD_COAST_FALL_JERK = 0.75  # m/s^3, gas fading out (+0.6 -> 0 in 0.8 s, stock's p50 fade)
+LEAD_COAST_RISE_JERK = 1.0  # m/s^3, gas coming back (-0.3 -> +0.7 in 1 s)
+LEAD_COAST_BRAKE_JERK = 1.0  # m/s^3, brake build-up from a coast while barely closing (stock p90 0.95)
 # Newborn lead aLeadK bound (D-080, proposed; replay only, not driven), now part of the StockBrakeFeel toggle (D-086). STATUS 212:
 # on 2e2 (bookmark ~283 s) a radar lead first seen while its velocity estimate was still converging published aLeadK
 # -3 / -2.5 when ~0.75 m/s^2 was needed, and on 2e1 a jumping track reached -13.7; the planner braked early and twice,
@@ -465,6 +516,49 @@ def stock_feel_target(leads, prev: float, target: float, dt: float) -> float:
     return brake_onset_limited_target(prev, target, dt, STOCK_FEEL_JERK_OUTSIDE)
   target = max(target, float(np.interp(ttc, STOCK_FEEL_DEPTH_BP, STOCK_FEEL_DEPTH_V)))
   return brake_onset_limited_target(prev, target, dt, float(np.interp(ttc, STOCK_FEEL_JERK_BP, STOCK_FEEL_JERK_V)))
+
+
+LEAD_COAST_OFF, LEAD_COAST_HOLD, LEAD_COAST_COAST = 0, 1, 2
+
+
+def lead_coast_wanted(leads, v_ego: float, t_follow: float, active: int) -> int:
+  """LEAD_COAST_HOLD while a lead closes on us inside LEAD_COAST_GAP_RATIO follow distances (exit hysteresis while
+  active); LEAD_COAST_COAST once matching its speed by the follow distance needs more than LEAD_COAST_NEED, held
+  until the closing ends."""
+  if not v_ego > LEAD_COAST_MIN_SPEED:
+    return LEAD_COAST_OFF
+  closing_min = LEAD_COAST_EXIT_CLOSING if active else LEAD_COAST_ENTER_CLOSING
+  ratio = LEAD_COAST_GAP_RATIO_EXIT if active else LEAD_COAST_GAP_RATIO
+  level = LEAD_COAST_OFF
+  for lead in leads:
+    if lead is None or not bool(getattr(lead, 'status', False)):
+      continue
+    v_rel = float(lead.vRel)
+    v_lead = max(float(getattr(lead, 'vLead', v_ego + v_rel)), 0.0)
+    follow = t_follow * v_lead + 6.0
+    if -v_rel > closing_min and float(lead.dRel) < ratio * follow:
+      level = max(level, LEAD_COAST_HOLD)
+      room = float(lead.dRel) - follow
+      if active == LEAD_COAST_COAST or (-v_rel > LEAD_COAST_ENTER_CLOSING if float(lead.dRel) < LEAD_COAST_NEAR_RATIO * follow else
+                                        v_rel * v_rel / (2.0 * room) > LEAD_COAST_NEED):
+        return LEAD_COAST_COAST
+  return level
+
+
+def lead_coast_ceiling(ceiling: float | None, prev: float, level: int, coast: float, dt: float) -> float | None:
+  """Throttle ceiling for the lead coast: falls from the last output at LEAD_COAST_FALL_JERK to 0 (hold) or the coast
+  accel (coast), then once off rises from where the output is at LEAD_COAST_RISE_JERK and is dropped (None) when it is
+  above ACCEL_MAX."""
+  coast = float(np.clip(coast, LEAD_COAST_MIN, 0.0))
+  if level:
+    target = coast if level == LEAD_COAST_COAST else 0.0
+    start = prev if ceiling is None else min(ceiling, max(prev, target))
+    return float(max(target, start - LEAD_COAST_FALL_JERK * dt))
+  if ceiling is None:
+    return None
+  # Rise from the last output, not from a ceiling that kept climbing above it, so the gas never jumps back.
+  ceiling = min(ceiling, max(prev, coast)) + LEAD_COAST_RISE_JERK * dt
+  return None if ceiling >= ACCEL_MAX else float(ceiling)
 
 
 def brake_onset_limited_target(prev: float, target: float, dt: float, jerk: float | None) -> float:
@@ -695,8 +789,7 @@ EXPERIMENTAL_HANDOFF_KEEP_E2E_BRAKE = -0.15
 # then confirmed on four logged drives with the toggle on (136c-136f): logged aTarget matched the
 # replay within 0.02 on 95-97% of acting frames, no hard brake in the 5-8 s after an episode was
 # caused by it, and 0 frames lifted while a lead closed faster than 0.5 m/s or braked harder than
-# -1.0. Baked in in 136g; Accel Boost built in on (136h; the GasOverrideBoost toggle
-# was removed 2026-10-03, replays set toggles.gas_override_boost False): still Experimental Mode only (get_exp_lead_departure_weight
+# -1.0. Baked in in 136g; Accel Boost built in on (136h; no toggle): still Experimental Mode only (get_exp_lead_departure_weight
 # requires a lead at or beyond the follow distance, and update_exp_lead_departure only runs on the
 # tinygrad-model branch below), and every other gate is unchanged. When a lead is at or beyond the
 # follow distance and pulling away, lift the e2e target part of the way toward the MPC. Stateless
@@ -1418,6 +1511,8 @@ class LongitudinalPlanner:
     self.mpc_lead_demand_hist = []
     self.brake_release_rise_ticks = BRAKE_RELEASE_DWELL_TICKS + 1
     self.coast_ceiling = None
+    self.lead_coast_active = LEAD_COAST_OFF
+    self.lead_coast_ceiling = None
     self.fast_closing_lead_track = None
     self.fast_closing_tick = 0
     self.fast_closing_vision_seen = {}
@@ -1479,7 +1574,7 @@ class LongitudinalPlanner:
     self.prev_experimental_mode = None
     self.exp_lead_departure_weight = 0.0
     self.exp_lead_departure_lift = 0.0
-    self.accel_boost = AccelBoost(self.dt)
+    self.accel_boost = AccelBoost()
     self.experimental_release_accel_until = 0.0
     self.exp_mode_blend_weight = 0.0
 
@@ -3379,18 +3474,11 @@ class LongitudinalPlanner:
         self.v_desired_trajectory, self.a_desired_trajectory,
         action_t=plan_action_t, vEgoStopping=starpilot_toggles.vEgoStopping)
       output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
-      accel_boost_on = bool(getattr(starpilot_toggles, "gas_override_boost", True))
-      if accel_boost_on:
-        # Port of commaai/openpilot PR 39015: boost the e2e target ahead of arbitration.
-        # Upstream compares against min(mpc, a_cruise). a_cruise here is the accel that reaches v_cruise
-        # within the actuator delay, the same formula as the downstream lead cruise cap.
-        a_cruise = max(0.0, (v_cruise - scene_v_ego + 0.01) / max(action_t, self.dt))
-        model_limited = experimental_mode and self.accel_boost.apply(output_a_target_e2e) < min(output_a_target_mpc, a_cruise)
-        self.accel_boost.update(bool(sm['selfdriveState'].enabled), bool(getattr(sm['carState'], 'gasPressed', False)),
-                                scene_v_ego, model_limited)
-        output_a_target_e2e = self.accel_boost.apply(output_a_target_e2e)
-      else:
-        self.accel_boost.update(False, False, scene_v_ego, False)
+      # Port of commaai/openpilot PR 39015: boost the e2e target ahead of arbitration.
+      # Upstream compares against min(mpc, a_cruise). a_cruise here is the accel that reaches v_cruise
+      # within the actuator delay, the same formula as the downstream lead cruise cap.
+      a_cruise = max(0.0, (v_cruise - scene_v_ego + 0.01) / max(action_t, self.dt))
+      output_a_target_e2e = self.accel_boost.update(sm, output_a_target_e2e, output_a_target_mpc, a_cruise)
       output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
       exp_active = not (self.mode == 'acc' or self.generation == 'v9')
@@ -3428,14 +3516,10 @@ class LongitudinalPlanner:
           getattr(sm['starpilotPlan'], 'forcingStop', False) or
           getattr(sm['starpilotPlan'], 'redLight', False)
         )
-        if accel_boost_on:
-          output_a_target = self.update_exp_lead_departure(
-            output_a_target, output_a_target_e2e, output_a_target_mpc, scene_v_ego,
-            sm['starpilotPlan'].tFollow, hold_experimental,
-          )
-        else:
-          self.exp_lead_departure_weight = 0.0
-          self.exp_lead_departure_lift = 0.0
+        output_a_target = self.update_exp_lead_departure(
+          output_a_target, output_a_target_e2e, output_a_target_mpc, scene_v_ego,
+          sm['starpilotPlan'].tFollow, hold_experimental,
+        )
     else:
       output_a_target, output_should_stop = get_accel_from_plan(
         self.v_desired_trajectory, self.a_desired_trajectory,
@@ -4157,7 +4241,19 @@ class LongitudinalPlanner:
     if bool(getattr(starpilot_toggles, "stock_brake_feel", False)) and not reset_state and not bool(sm['carState'].standstill) and not (
         output_should_stop or vision_low_speed_stop_active or
         getattr(sm['starpilotPlan'], 'forcingStop', False) or getattr(sm['starpilotPlan'], 'redLight', False)):
+      self.lead_coast_active = lead_coast_wanted((self.lead_one, self.lead_two), scene_v_ego, effective_t_follow,
+                                                 self.lead_coast_active)
+      self.lead_coast_ceiling = lead_coast_ceiling(self.lead_coast_ceiling, prev_output_a_target, self.lead_coast_active,
+                                                   accel_coast, self.dt)
+      if self.lead_coast_ceiling is not None:
+        output_a_target = min(output_a_target, self.lead_coast_ceiling)
+        leads = (self.lead_one, self.lead_two)
+        if brake_onset_ttc(leads, STOCK_FEEL_MIN_CLOSING) == float('inf') and brake_onset_ttc(leads) > STOCK_FEEL_TTC_FLOOR_S:
+          output_a_target = brake_onset_limited_target(prev_output_a_target, output_a_target, self.dt, LEAD_COAST_BRAKE_JERK)
       output_a_target = stock_feel_target((self.lead_one, self.lead_two), prev_output_a_target, output_a_target, self.dt)
+    else:
+      self.lead_coast_active = LEAD_COAST_OFF
+      self.lead_coast_ceiling = None
     if BRAKE_RELEASE_LIMIT and not reset_state and not bool(sm['carState'].standstill):
       # prev is the last published target (after the on-path bound in update(), which runs after this)
       output_a_target = brake_release_limited_target(prev_output_a_target, output_a_target, self.dt)
@@ -4199,7 +4295,7 @@ class LongitudinalPlanner:
     longitudinalPlan.leadTrajectoryV1 = self.mpc.lead_xv_1[:, 1].tolist()
 
     longitudinalPlan.aTarget = float(self.output_a_target)
-    longitudinalPlan.accelBoost = float(self.accel_boost.value)
+    longitudinalPlan.accelBoost = float(self.accel_boost.total_boost)
     force_stop_handoff = bool(
       sm['starpilotPlan'].forcingStop and (
         sm['starpilotPlan'].forcingStopLength < 1.0 or
