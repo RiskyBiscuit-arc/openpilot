@@ -1479,7 +1479,7 @@ class LongitudinalPlanner:
     self.prev_experimental_mode = None
     self.exp_lead_departure_weight = 0.0
     self.exp_lead_departure_lift = 0.0
-    self.accel_boost = AccelBoost(self.dt)
+    self.accel_boost = AccelBoost()
     self.experimental_release_accel_until = 0.0
     self.exp_mode_blend_weight = 0.0
 
@@ -3385,12 +3385,9 @@ class LongitudinalPlanner:
         # Upstream compares against min(mpc, a_cruise). a_cruise here is the accel that reaches v_cruise
         # within the actuator delay, the same formula as the downstream lead cruise cap.
         a_cruise = max(0.0, (v_cruise - scene_v_ego + 0.01) / max(action_t, self.dt))
-        model_limited = experimental_mode and self.accel_boost.apply(output_a_target_e2e) < min(output_a_target_mpc, a_cruise)
-        self.accel_boost.update(bool(sm['selfdriveState'].enabled), bool(getattr(sm['carState'], 'gasPressed', False)),
-                                scene_v_ego, model_limited)
-        output_a_target_e2e = self.accel_boost.apply(output_a_target_e2e)
+        output_a_target_e2e = self.accel_boost.update(sm, output_a_target_e2e, output_a_target_mpc, a_cruise)
       else:
-        self.accel_boost.update(False, False, scene_v_ego, False)
+        self.accel_boost.reset()
       output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
       exp_active = not (self.mode == 'acc' or self.generation == 'v9')
@@ -4199,7 +4196,7 @@ class LongitudinalPlanner:
     longitudinalPlan.leadTrajectoryV1 = self.mpc.lead_xv_1[:, 1].tolist()
 
     longitudinalPlan.aTarget = float(self.output_a_target)
-    longitudinalPlan.accelBoost = float(self.accel_boost.value)
+    longitudinalPlan.accelBoost = float(self.accel_boost.total_boost)
     force_stop_handoff = bool(
       sm['starpilotPlan'].forcingStop and (
         sm['starpilotPlan'].forcingStopLength < 1.0 or

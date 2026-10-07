@@ -689,6 +689,7 @@ def make_sm(v_ego: float, desired_accel: float, min_accel: float, *, experimenta
       aEgo=0.0,
       vCruise=100.0,
       standstill=False,
+      gasPressed=False,
       steeringAngleDeg=0.0,
     ),
     "controlsState": SimpleNamespace(
@@ -5213,18 +5214,18 @@ def _boost_planner_run(on, *, lead_one=None, presses=3):
 def test_accel_boost_toggle_on_builds_boost_and_off_publishes_none():
   on = _boost_planner_run(True)
   off = _boost_planner_run(False)
-  assert on.accel_boost.value > 0.0
-  assert off.accel_boost.value == 0.0
+  assert on.accel_boost.total_boost > 0.0
+  assert off.accel_boost.total_boost == 0.0
   assert on.output_a_target > off.output_a_target
 
 
 def test_accel_boost_toggle_off_clears_a_built_boost():
   planner = _boost_planner_run(True)
-  assert planner.accel_boost.value > 0.0
+  assert planner.accel_boost.total_boost > 0.0
   sm = make_sm(17.0, -0.3, -3.5, experimental_mode=True)
   sm["carState"].gasPressed = False
   planner.update(sm, _boost_toggles(False))
-  assert planner.accel_boost.value == 0.0
+  assert planner.accel_boost.total_boost == 0.0
 
 
 def test_accel_boost_toggle_gates_the_lead_departure_assist():
@@ -5261,7 +5262,7 @@ def test_accel_boost_defaults_on_when_the_toggle_attribute_is_missing():
     planner.update(sm, toggles)
     sm["carState"].gasPressed = False
     planner.update(sm, toggles)
-  assert planner.accel_boost.value > 0.0
+  assert planner.accel_boost.total_boost > 0.0
 
 
 # report §12.3 P5 / P6, baked in 2026-10-04 (STATUS 204)
