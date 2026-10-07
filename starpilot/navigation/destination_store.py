@@ -117,6 +117,8 @@ def normalize_destination_payload(payload: Any) -> dict[str, Any] | None:
 
   if not name or latitude is None or longitude is None:
     return None
+  if abs(latitude) > 90.0 or abs(longitude) > 180.0 or (abs(latitude) < 1e-4 and abs(longitude) < 1e-4):
+    return None
 
   normalized = {
     "name": name,

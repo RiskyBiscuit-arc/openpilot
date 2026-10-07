@@ -174,7 +174,13 @@ export function addRouteToMap(map, routes, start, dest, onRouteSelect, useMetric
 
 
   const padding = window.innerWidth < 600 ? 100 : 250;
-  map.fitBounds([start, dest], { padding, duration: 1000 });
+  const isRealPoint = (p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]) &&
+    Math.abs(p[0]) <= 180 && Math.abs(p[1]) <= 90 && (Math.abs(p[0]) > 1e-4 || Math.abs(p[1]) > 1e-4);
+  if (isRealPoint(start) && isRealPoint(dest)) {
+    map.fitBounds([start, dest], { padding, duration: 1000 });
+  } else if (isRealPoint(dest)) {
+    map.flyTo({ center: dest, zoom: 14, duration: 1000 });
+  }
 }
 
 export async function getCoordinatesFromSearch(searchValue, mapboxPublic, searchContext = {}) {

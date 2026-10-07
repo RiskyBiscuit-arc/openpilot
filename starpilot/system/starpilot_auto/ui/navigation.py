@@ -10,6 +10,7 @@ place is picked, which is how Mapbox bills them.
 
 from __future__ import annotations
 
+import math
 import queue
 import threading
 import time
@@ -46,7 +47,9 @@ from openpilot.starpilot.system.starpilot_auto.ui.nav_map import NavMapView
 from openpilot.selfdrive.ui.onroad.starpilot.navigation_card import _format_distance
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.starpilot.navigation.route_engine import Coordinate, MapboxRouteEngine, NavigationRoute
+from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import tr
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 
 NAV_ROUTE_ROW_HEIGHT = 104.0
 NAV_PREF_BUTTON_HEIGHT = 62.0
@@ -92,6 +95,31 @@ class LiveSearchClient(MapboxSearchClient):
   def search(self, query: str, public_token: str, session_token: str, *, proximity: tuple[float, float] | None = None,
              language: str = "", limit: int = LIVE_RESULT_LIMIT) -> list[SearchResult]:
     return super().search(query, public_token, session_token, proximity=proximity, language=language, limit=limit)
+
+
+LEAF_GREEN = rl.Color(76, 201, 106, 255)
+LEAF_VEIN = rl.Color(24, 110, 52, 255)
+
+
+def draw_leaf(cx: float, cy: float, size: float, alpha: int = 255) -> None:
+  """A green leaf centred on (cx, cy), `size` pixels tall; drawn as shapes because the UI font has no leaf glyph."""
+  half = size / 2.0
+  steps = 12
+  ang = -math.pi / 4.0
+  ca, sa = math.cos(ang), math.sin(ang)
+
+  def at(u: float, v: float) -> rl.Vector2:
+    # u along the leaf (-1 base .. 1 tip), v across it; rotated so the tip points up and to the right
+    x, y = u * half, v * half
+    return rl.Vector2(cx + x * ca - y * sa, cy + x * sa + y * ca)
+
+  outline = [at(-1 + 2 * i / steps, 0.55 * math.sin(math.pi * i / steps) ** 0.9) for i in range(steps + 1)]
+  outline += [at(1 - 2 * i / steps, -0.55 * math.sin(math.pi * i / steps) ** 0.9) for i in range(1, steps)]
+  fan = [at(0.0, 0.0)] + outline + [outline[0]]
+  green = rl.Color(LEAF_GREEN.r, LEAF_GREEN.g, LEAF_GREEN.b, alpha)
+  vein = rl.Color(LEAF_VEIN.r, LEAF_VEIN.g, LEAF_VEIN.b, alpha)
+  rl.draw_triangle_fan(fan, len(fan), green)
+  rl.draw_line_ex(at(-1.25, 0.0), at(0.7, 0.0), max(1.5, size / 12.0), vein)
 
 
 class CarNavigationLayout(StarPilotNavigationLayout):
@@ -316,7 +344,7 @@ class CarNavigationLayout(StarPilotNavigationLayout):
       ("action:pref:tolls", tr("Avoid Tolls"), bool(self._route_prefs.get("avoid_tolls", False))),
       ("action:pref:highways", tr("Avoid Highways"), bool(self._route_prefs.get("avoid_highways", False))),
       ("action:pref:ferries", tr("Avoid Ferries"), bool(self._route_prefs.get("avoid_ferries", False))),
-      ("action:pref:eco", tr("🌿 Fuel-Efficient"), bool(self._route_prefs.get("prefer_eco", False))),
+      ("action:pref:eco", tr("Fuel-Efficient"), bool(self._route_prefs.get("prefer_eco", False))),
     ]
 
   def _preferences_section_height(self) -> float:
@@ -356,6 +384,9 @@ class CarNavigationLayout(StarPilotNavigationLayout):
         border = with_alpha(PANEL_STYLE.surface_border, 40 if (hovered or pressed) else 18)
         text_color = AetherListColors.MUTED
       draw_action_pill(rect, label, fill, border, text_color, font_size=22)
+      if target_id == "action:pref:eco":
+        label_w = measure_text_cached(gui_app.font(FontWeight.SEMI_BOLD), label, 22).x
+        draw_leaf(rect.x + (rect.width - label_w) / 2 - 18, rect.y + rect.height / 2, 24, 255 if active else 150)
 
     return NAV_SECTION_HEIGHT + 2 * NAV_PREF_BUTTON_HEIGHT + NAV_PREF_GAP + NAV_GAP
 
@@ -406,7 +437,7 @@ class CarNavigationLayout(StarPilotNavigationLayout):
         title = tr("Recommended route") if index == 0 else tr("Alternative {}").format(index)
       subtitle = f"{self._duration_text(route.total_duration)}  •  {_format_distance(route.total_distance, ui_state.is_metric)}"
       if route.is_eco_recommended and route.eco_savings_pct >= 1.0:
-        subtitle += "  •  " + tr("🌿 Saves {:.0f}% fuel").format(route.eco_savings_pct)
+        subtitle += "  •  " + tr("Saves {:.0f}% fuel").format(route.eco_savings_pct)
       elif index > 0 and route.total_duration > fastest + 30:
         subtitle += "  •  " + tr("+{} slower").format(self._duration_text(route.total_duration - fastest))
       rows.append((f"route:{index}", title, subtitle))
@@ -471,5 +502,9 @@ class CarNavigationLayout(StarPilotNavigationLayout):
         current_border=AetherListColors.CURRENT_BORDER,
         row_separator=PANEL_STYLE.divider_color,
       )
+      if self._preview_routes[index].is_eco_recommended:
+        title_w = measure_text_cached(gui_app.font(FontWeight.SEMI_BOLD), title, 30).x
+        title_y = row_y + 16 + (NAV_ROUTE_ROW_HEIGHT - 32 - (30 + 22 + 8)) / 2
+        draw_leaf(row_rect.x + 24 + title_w + 22, title_y + 15, 28)
       row_y += NAV_ROUTE_ROW_HEIGHT
     return NAV_SECTION_HEIGHT + len(rows) * NAV_ROUTE_ROW_HEIGHT + NAV_GAP

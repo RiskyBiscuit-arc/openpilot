@@ -798,8 +798,8 @@ export function NavDestination() {
       ? [state.lastPosition.longitude, state.lastPosition.latitude]
       : (parseCoordinatePair(state.destination)
         ? [state.destination.longitude, state.destination.latitude]
-        : [0, 0]);
-    const initialZoom = state.lastPosition ? 15 : 2;
+        : [-98.5, 39.8]);
+    const initialZoom = state.lastPosition ? 15 : (parseCoordinatePair(state.destination) ? 12 : 3);
     map = new mapboxgl.Map({
       container,
       center: initialCenter,
