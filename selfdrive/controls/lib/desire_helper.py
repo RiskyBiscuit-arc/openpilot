@@ -135,7 +135,10 @@ class DesireHelper:
     widths = {"left": getattr(starpilotPlan, "laneWidthLeft", None), "right": getattr(starpilotPlan, "laneWidthRight", None)}
     prompt = nav_lane_move_prompt(state, carstate.vEgo, starpilot_toggles.minimum_lane_change_speed, widths,
                                   starpilot_toggles.lane_detection_width, now)
-    key = (prompt["armed"], prompt["side"], prompt["kind"])
+    v_asm_enabled = bool(getattr(starpilot_toggles, "v_asm_enabled", False))
+    side_dir = {"left": LaneChangeDirection.left, "right": LaneChangeDirection.right}.get(prompt["side"], LaneChangeDirection.none)
+    prompt["blocked"] = bool(prompt["armed"] and self._get_combined_blindspot(carstate, side_dir, v_asm_enabled))
+    key = (prompt["armed"], prompt["side"], prompt["kind"], prompt["blocked"])
     # rewrite every 1 s while armed so the UI can drop a stale prompt by timestamp
     if key == self._prompt_last and not (prompt["armed"] and now - self._prompt_last_t >= 1.0):
       return

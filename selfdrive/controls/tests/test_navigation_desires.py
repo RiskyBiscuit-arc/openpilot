@@ -677,6 +677,39 @@ def test_nav_exit_lane_change_blocked_by_vision_asm():
   assert helper.lane_change_state == LaneChangeState.preLaneChange
 
 
+def _prompt_helper():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {"valid": True, "maneuverType": "off ramp", "maneuverModifier": "right", "maneuverDistance": 900.0}
+  published = []
+  helper.params_memory.put_nonblocking = lambda k, v: published.append((k, v))
+  return helper, published
+
+
+def test_lane_move_prompt_marks_blocked_when_blindspot_occupied():
+  helper, published = _prompt_helper()
+  toggles = make_toggles(nav_desires_allowed=True)
+  helper._publish_lane_move_prompt(make_car_state(vEgo=25.0, rightBlindspot=True), make_plan(laneWidthRight=4.0), toggles, True)
+  key, prompt = published[-1]
+  assert key == "NavLaneMovePrompt" and prompt["armed"] and prompt["side"] == "right" and prompt["blocked"]
+  helper._publish_lane_move_prompt(make_car_state(vEgo=25.0, rightBlindspot=False), make_plan(laneWidthRight=4.0), toggles, True)
+  assert published[-1][1]["armed"] and not published[-1][1]["blocked"]
+  helper._publish_lane_move_prompt(make_car_state(vEgo=25.0, leftBlindspot=True), make_plan(laneWidthRight=4.0), toggles, True)
+  assert not published[-1][1]["blocked"]
+
+
+def test_prompted_lane_move_blocked_by_blindspot_until_clear():
+  helper, _ = _prompt_helper()
+  toggles = make_toggles(nav_desires_allowed=True)
+  plan = make_plan(laneWidthRight=4.0)
+  nudge = dict(vEgo=25.0, rightBlinker=True, steeringPressed=True, steeringTorque=-3.0)
+  for _ in range(40):
+    helper.update(make_car_state(rightBlindspot=True, **nudge), True, 0.0, plan, toggles)
+  assert helper.lane_change_state == LaneChangeState.preLaneChange
+  helper.update(make_car_state(rightBlindspot=False, **nudge), True, 0.0, plan, toggles)
+  assert helper.lane_change_state == LaneChangeState.laneChangeStarting
+
+
 def test_turn_desire_heading_recoil_clears_desire():
   helper = DesireHelper()
   helper._update_nav_params = lambda: None
