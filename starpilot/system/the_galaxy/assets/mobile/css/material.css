@@ -2664,3 +2664,4 @@ input[type="checkbox"] { accent-color: var(--primary); flex: 0 0 auto; height: 1
   .gx-section__header { flex-wrap: wrap; }
   input[type="search"].gx-field { text-overflow: ellipsis; }
 }
+.gx-tabs > button.gx-chip { border: 0; font-family: inherit; line-height: 1.2; min-height: 26px; padding: 3px 10px; }
