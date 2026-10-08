@@ -2652,8 +2652,15 @@ button.gx-chip:hover {
 /* Audit polish: icon chips, link buttons, native checkboxes */
 .gx-chip > i { margin-right: 6px; }
 .gx-chip { white-space: nowrap; }
+.gx-section__header .gx-chip { white-space: normal; text-align: center; }
+.gx-tab { flex-shrink: 0; white-space: nowrap; }
 .gx-btn--tonal { white-space: nowrap; }
 input[type="checkbox"] { accent-color: var(--primary); flex: 0 0 auto; height: 18px; width: 18px; }
 @media (max-width: 767px) {
   .gx-btn--tonal { font-size: var(--fs-sm); min-height: 38px; padding: 0 var(--sp-4); }
+}
+@media (max-width: 767px) {
+  .gx-row--stack { align-items: stretch; flex-direction: column; gap: var(--sp-2); }
+  .gx-section__header { flex-wrap: wrap; }
+  input[type="search"].gx-field { text-overflow: ellipsis; }
 }
