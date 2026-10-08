@@ -10808,3 +10808,12 @@ with no BRAKE_REQUEST/lights; the coast never replaces a real brake). controls +
 
 **Watch on the next drive:** fewer brake-light taps while following on the highway; the car should coast instead. Any gap that
 opens too much in light closing, and any slowdown that starts later than expected near a lead on a curve.
+
+**First drive on the fix build: 000002f9--46a5eb8e01 (commit 6d5c3b5d9, 2026-10-08), limited road evidence.** Owner: "It was a short one but
+pretty smooth". 3.9 min under openpilot long, mostly free road at 35-45 mph, two stops behind a car (2:28, 4:40) and one stretch of
+following (5:40-5:50). From sendcan ACC_CONTROL and `longitudinalPlan.leadCoast`: the coast flag was on for 70 frames and every one went
+out as a true coast (GAS_COMMAND -30000, no BRAKE_REQUEST), 0 as a brake. Coasts at 2:27.8 (0.8 s, then the real stop brake to -1.56),
+4:42.1 (0.8 s, then the stop brake), 5:40.2 (0.7 s), 5:44.2 (0.5 s, then a real brake 3.8 s to -0.77) and 5:48.6 (0.6 s). No light brake
+taps (< 3 s, shallower than -0.6) at all; 2f8 had 1.65 per engaged minute by the same count. A railed radar lead appeared on 2
+frames (2:25.3, far approach to the first stop); nothing to judge D-090 on. Too short to call either fix settled; the highway following
+of 2f8 was not repeated.
