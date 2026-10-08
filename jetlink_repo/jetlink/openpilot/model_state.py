@@ -60,6 +60,11 @@ HOLD_WINDOW = 10.0
 # wheel, where an iPhone's every return was a soft disable within a second
 # (2026-10-04)
 PROVING_FRAMES = 20
+# the first of them never hand back, held or not: the first after a join
+# carries the history reset, and a Mac's is ~100 ms of CoreML warm-up. A
+# single slow frame later is the comma's own stall, a warp or a send, which
+# handing back would not fix; only held frames say the host is behind
+SETTLING_FRAMES = 3
 # frames between asks for the server's telemetry, which rides on the response:
 # every second one, as modeld sent a chestnut's state (20 Hz over 10 Hz)
 TELEMETRY_EVERY = 2
@@ -288,13 +293,18 @@ class JetlinkModelState:
       # receive stalls once the Jetson is offline; server total excludes USB
       gpu_us, queue_us, total_us = self.client.last_timings
       receive = getattr(self.client.t, 'last_receive', {})
+      # over the cable: how frames go, how many never came back, and what the
+      # kernel dropped on the way in (softnet), since the link came up
+      drops = getattr(self.client.t, 'net_drops', lambda: None)()
+      cable = (f"; frames {'as datagrams' if self.client.t.datagrams else 'on the stream'}, "
+               f"{self.client.frames_lost} lost, net drops {drops}" if drops is not None else '')
       self._log.warning("jetlink: frame %d warp %.1f data %.1f send %.1f wait %.1f ms%s; "
-                        "server gpu %.1f queue %.1f total %.1f ms; ffs maxima prepare %.1f read_wait %.1f handoff %.1f ms",
+                        "server gpu %.1f queue %.1f total %.1f ms; ffs maxima prepare %.1f read_wait %.1f handoff %.1f ms%s",
                         self._frame_id, (frame.t1 - frame.t0) * 1e3, (frame.t2 - frame.t1) * 1e3,
                         (frame.sent - frame.t2) * 1e3, (t4 - waiting_from) * 1e3,
                         note,
                         gpu_us / 1e3, queue_us / 1e3, total_us / 1e3, receive.get('prepare', 0.0) * 1e3,
-                        receive.get('read_wait', 0.0) * 1e3, receive.get('handoff', 0.0) * 1e3)
+                        receive.get('read_wait', 0.0) * 1e3, receive.get('handoff', 0.0) * 1e3, cable)
     return outputs
 
   def run(self, bufs: dict, transforms: dict[str, np.ndarray],
@@ -315,9 +325,9 @@ class JetlinkModelState:
 
   def _note_hold(self, held: bool) -> str | None:
     """Why the large model should hand back after this frame, if it should:
-    any held frame among its first PROVING_FRAMES, HOLDS_IN_A_ROW held frames
-    running, or more than HOLDS_ALLOWED in HOLD_WINDOW. None while it is
-    keeping up."""
+    any held frame among its first PROVING_FRAMES past SETTLING_FRAMES,
+    HOLDS_IN_A_ROW held frames running, or more than HOLDS_ALLOWED in
+    HOLD_WINDOW. None while it is keeping up."""
     if not held:
       self._holds_in_a_row = 0
       return None
@@ -327,6 +337,8 @@ class JetlinkModelState:
     while now - self._holds[0] > HOLD_WINDOW:
       self._holds.popleft()
     self._holds_in_a_row += 1
+    if self._frame_id <= SETTLING_FRAMES:
+      return None
     if self._frame_id <= PROVING_FRAMES:
       return f'held frame {self._frame_id} of the first {PROVING_FRAMES}'
     if self._holds_in_a_row >= HOLDS_IN_A_ROW:
@@ -343,7 +355,6 @@ class JetlinkModelState:
     # the non-finite check runs on the server (Status.NOT_FINITE -> LinkError),
     # so modeld's big->small failover fires as it does for a chestnut
     outputs_dict = self.parser.parse_outputs(self.slice_outputs(model_output, self.output_slices))
-    self.spec.feed_back(self.packed, model_output)
     if SEND_RAW_PRED:
       outputs_dict['raw_pred'] = model_output.copy()
     self._parsed = (model_output, outputs_dict)
