@@ -2648,3 +2648,12 @@ button.gx-chip:hover {
 .gx-car-diag__outcome--error { color: var(--error, #f85149); }
 .gx-car-diag__report { display: grid; gap: 8px; justify-items: start; padding: 0 var(--sp-3) var(--sp-3); min-width: 0; }
 .gx-car-diag__report pre { margin: 0; width: 100%; max-height: 360px; overflow: auto; padding: 12px; border-radius: 12px; border: 1px solid var(--outline-variant); background: var(--surface-container, rgba(255,255,255,.03)); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Audit polish: icon chips, link buttons, native checkboxes */
+.gx-chip > i { margin-right: 6px; }
+.gx-chip { white-space: nowrap; }
+.gx-btn--tonal { white-space: nowrap; }
+input[type="checkbox"] { accent-color: var(--primary); flex: 0 0 auto; height: 18px; width: 18px; }
+@media (max-width: 767px) {
+  .gx-btn--tonal { font-size: var(--fs-sm); min-height: 38px; padding: 0 var(--sp-4); }
+}
