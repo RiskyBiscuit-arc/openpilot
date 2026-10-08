@@ -549,8 +549,8 @@ class StarPilotLongitudinalLayout(_SettingsPage):
                  set_state=lambda s: self._params.put_bool("ResumeBrakeRamp", s),
                  visible=adv),
       SettingRow("StockBrakeFeel", "toggle", tr_noop("Stock Brake Feel"),
-                 subtitle=tr_noop("Brakes for a closing car like stock ACC: slower build-up, and no deeper than stock at the same "
-                                  "time to contact. Normal braking under 2 s to contact and when stopping. Closes the gap more. Replay only, not driven."),
+                 subtitle=tr_noop("Coasts up to a slower car instead of staying on the gas, then brakes like stock ACC: slow build-up, "
+                                  "no deeper than stock. Normal braking under 2 s to contact and when stopping."),
                  get_state=lambda: self._params.get_bool("StockBrakeFeel"),
                  set_state=lambda s: self._params.put_bool("StockBrakeFeel", s),
                  visible=adv),
@@ -613,20 +613,6 @@ class StarPilotLongitudinalLayout(_SettingsPage):
                                   "way. Restart required to take effect."),
                  get_state=lambda: self._params.get_bool("BoschARadar"),
                  set_state=lambda v: self._params.put_bool("BoschARadar", v)),
-      SettingRow("BoschARangeOffsetFallback", "toggle", tr_noop("Dynamic Radar Range Offset"),
-                 subtitle=tr_noop("Bosch-A radar only. Automatically ingests CAN 0x669 (1 Hz) chassis mounting calibration from the camera, "
-                                  "dynamically setting the radar bumper offset (-1.72 m on Civic, -1.77 m on CR-V). When off, uses factory fallback "
-                                  "(-2.617 m on Civic, -2.664 m on CR-V). Restart required to take effect."),
-                 get_state=lambda: self._params.get_bool("BoschARangeOffsetFallback"),
-                 set_state=lambda v: self._params.put_bool("BoschARangeOffsetFallback", v)),
-      SettingRow("BoschAOverBrakeComp", "toggle", tr_noop("Mid-Band Over-Brake Comp"),
-                 subtitle=tr_noop("Mid-band over-brake compensation for Civic Bosch. Restart required."), 
-                 get_state=lambda: self._params.get_bool("BoschAOverBrakeComp"),
-                 set_state=lambda v: self._params.put_bool("BoschAOverBrakeComp", v)),
-      SettingRow("BoschABirthRailRamps", "toggle", tr_noop("Birth-Rail Ramps"),
-                 subtitle=tr_noop("D-077 birth-rail ramps. Restart required."), 
-                 get_state=lambda: self._params.get_bool("BoschABirthRailRamps"),
-                 set_state=lambda v: self._params.put_bool("BoschABirthRailRamps", v)),
     ]
 
     self._slc_rows = [

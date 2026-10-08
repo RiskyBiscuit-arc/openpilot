@@ -133,7 +133,7 @@ def test_c4_draw_border_paints_traffic_color_on_active_half(monkeypatch):
 
   scissor = [c for c in calls if c[0] == "begin_scissor"]
   assert scissor[0][1] == (10, 20, 200, 100)
-  assert scissor[1][1] == (14, 24, 96, 92)
+  assert scissor[1][1] == (20, 30, 90, 80)
 
 
 def test_c4_draw_border_skips_traffic_colors_when_inactive(monkeypatch):

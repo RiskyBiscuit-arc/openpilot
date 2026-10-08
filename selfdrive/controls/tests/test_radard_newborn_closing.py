@@ -17,10 +17,10 @@ def newborn_leads_on():
   radard.set_bosch_a_newborn_leads(True)
 
 
-def make_track(ranges, v_rel, v_ego=19.8, t0=100.0):
+def make_track(ranges, v_rel, v_ego=19.8, t0=100.0, measured=False):
   track = radard.Track(39, v_rel + v_ego, radard.KalmanParams(DT))
   for i, d in enumerate(ranges):
-    track.update(d, 0.0, v_rel, v_rel + v_ego, False, measurement_update=False, t_now=t0 + i * DT)
+    track.update(d, 0.0, v_rel, v_rel + v_ego, measured, measurement_update=measured, t_now=t0 + i * DT)
   return track
 
 
@@ -46,10 +46,27 @@ def test_noisy_run_is_not_closing():
   assert not radard.young_range_genuinely_closing(make_track(ranges, -10.5), 19.8)
 
 
-def test_vrel_disagreeing_with_range_is_not_closing():
+def test_measured_vrel_disagreeing_with_range_is_not_closing():
   ranges = linear(116.0, 90.0, 19)
-  assert not radard.young_range_genuinely_closing(make_track(ranges, -16.0), 19.8)  # |~-20.6 - -16| > 3
-  assert radard.young_range_genuinely_closing(make_track(ranges, -18.5), 19.8)
+  measured = make_track(ranges, -16.0, measured=True)
+  assert measured.cnt > 0
+  assert not radard.young_range_genuinely_closing(measured, 19.8)  # U11 |~-20.6 - -16| > 3
+  assert radard.young_range_genuinely_closing(make_track(ranges, -18.5, measured=True), 19.8)
+
+
+def test_never_measured_vrel_is_not_compared_with_its_own_range():
+  # Its vRel is radar_interface's fit of these same ranges; the old agreement check was circular (PR #17 review).
+  ranges = linear(116.0, 90.0, 19)
+  track = make_track(ranges, -16.0)
+  assert track.cnt == 0
+  assert radard.young_range_genuinely_closing(track, 19.8)
+
+
+def test_closing_faster_than_a_stopped_object_is_not_closing():
+  # 116 -> 80 m in ~1.25 s is ~-28.6 m/s at vEgo 19.8: more than 5 m/s past stationary, so range noise, not a lead.
+  assert not radard.young_range_genuinely_closing(make_track(linear(116.0, 80.0, 19), -19.8), 19.8)
+  # 000002ae 17 track 39 fit ~-23 at vEgo 19.8 (3.2 past stationary): still exempt.
+  assert radard.young_range_genuinely_closing(make_track(linear(116.0, 87.8, 19), -19.8), 19.8)
 
 
 def test_short_or_old_or_slow_closing_is_not_closing():
@@ -155,3 +172,38 @@ def test_newborn_kf_untouched_without_flag_or_after_a_measurement():
   for i, d in enumerate(linear(115.0, 90.0, 18)):
     track.update(d, 0.0, -8.0, 11.8, False, measurement_update=False, t_now=100.0 + (i + 1) * DT, newborn_follow=True)
   assert track.vLeadK == pytest.approx(11.8)
+
+
+def _stale_then_measured(gap_s, v_meas=1.9, v_ego=12.5, n_meas=8):
+  # 000002f7 21:31 track 15 style: 2 s of unmeasured range at -5 m/s (seed vEgo - 5 = 7.5), then unmeasured for gap_s
+  # past the follow window, then measured sweeps at v_meas.
+  n = int(radard.YOUNG_TRACK_MAX_AGE_S / DT) + 1
+  track = _newborn(linear(72.7, 72.7 - 5.0 * (n - 1) * DT, n), -12.0, v_ego=v_ego)
+  t, d = 100.0 + (n - 1) * DT, 72.7 - 5.0 * (n - 1) * DT
+  assert track.vLeadK == pytest.approx(v_ego - 5.0, abs=0.05)
+  t += gap_s
+  aleadk = []
+  for _ in range(n_meas):
+    t += DT
+    d -= (v_ego - v_meas) * DT
+    track.update(d, 0.0, v_meas - v_ego, v_meas, True, measurement_update=True, t_now=t)
+    aleadk.append(track.aLeadK)
+  return track, aleadk
+
+
+def test_stale_newborn_seed_is_dropped_on_the_first_measurement():
+  track, aleadk = _stale_then_measured(gap_s=2.3)
+  assert track.vLeadK == pytest.approx(1.9, abs=0.05)
+  assert min(aleadk) > -0.5
+
+
+def test_fresh_newborn_seed_is_kept():
+  # Measured within NEWBORN_KF_STALE_SEED_S of the last follow seed: the KF takes over from the follow state as before.
+  track, aleadk = _stale_then_measured(gap_s=0.0)
+  assert min(aleadk) < -2.0
+
+
+def test_negative_control_stale_reseed_off_reproduces_the_fake_decel(monkeypatch):
+  monkeypatch.setattr(radard, "NEWBORN_KF_STALE_RESEED", False)
+  _, aleadk = _stale_then_measured(gap_s=2.3)
+  assert min(aleadk) < -4.0

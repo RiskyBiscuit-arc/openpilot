@@ -405,9 +405,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"GasOverrideBoost", {PERSISTENT, BOOL, "1", "1", 3}},
     // TEST, default OFF. Bosch-A only. D-076: range offset -335/128 = -2.617 m (the firmware fallback) instead of -3.0;
     // every dRel reads 0.383 m longer. Static only. Read once at startup in honda/radar_interface.py.
-    {"BoschARangeOffsetFallback", {PERSISTENT, BOOL, "0", "0", 3}},
-    {"BoschAOverBrakeComp", {PERSISTENT, BOOL, "0", "0", 3}},
-    {"BoschABirthRailRamps", {PERSISTENT, BOOL, "0", "0", 3}},
     // TEST, default OFF. Bosch-A only. Steps Track.aLeadTau at the radar sweep rate (~14.35 Hz) instead of the 20 Hz
     // model rate, so its wall-clock time constant is ~0.47 s instead of ~0.66 s. Static only. Read once when radard
     // starts (BOSCH_A_LEAD_ACCEL_TAU_RADAR_DT in selfdrive/controls/radard.py).
@@ -611,6 +608,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ClearNavOnOffroadTimeoutMinutes", {PERSISTENT, INT, "0", "0", 2, SETTINGS_SIMPLE}},
     {"NavDestination", {PERSISTENT | CLEAR_ON_MANAGER_START, STRING, "", ""}},
     {"NavInstructionCollapsed", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL, "0", "0"}},
+    {"NavLaneMovePrompt", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, JSON, "{}", "{}"}},
     {"NavInstructionState", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, JSON, "{}", "{}"}},
     {"NextMapSpeedLimit", {CLEAR_ON_MANAGER_START, JSON, "{}", "{}"}},
     {"VisionSpeedLimit", {CLEAR_ON_MANAGER_START, FLOAT, "0.0", "0.0"}},

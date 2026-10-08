@@ -10,6 +10,7 @@ from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.radar_interface import (
   BOSCH_A_REANCHOR_MIN_SPAN_S,
+  BOSCH_A_REANCHOR_WINDOW,
   BOSCH_A_AZIMUTH_SCALE_RAD,
   BOSCH_A_AUX_IDS,
   BOSCH_A_DBC_NAME,
@@ -37,7 +38,6 @@ from opendbc.car.honda.radar_interface import (
   _bosch_a_main_base,
   _bosch_a_range_ratio,
   _bosch_a_range_ratio_vrel,
-  bosch_a_range_offset_fallback_m,
   bosch_a_range_offset_m,
 )
 import opendbc.car.honda.radar_interface as radar_interface_module
@@ -707,104 +707,24 @@ class TestU11Scale72:
     assert _bosch_a_direct_vrel_interval(inside) == (inside, inside)
 
 
-class TestRangeOffsetFallback:
-  """D-076 BoschARangeOffsetFallback: OFF uses factory fallback (-2.617 m on Civic, -2.664 m on CR-V).
-  ON enables dynamic ingestion of CAN 0x669 (-1.71875 m on Civic, -1.765625 m on CR-V)."""
+class TestRangeOffsetFirmwareDefault:
+  """D-076: fixed firmware ROM-default offset per car, -335/128 Civic and -341/128 CR-V. No toggle, no CAN 0x669."""
 
-  @staticmethod
-  def _dRel(ri, raw_range=1000):
-    ri.update(sweep(0, 0, 0x7, raw_range, 1024, 1, 0))
-    rr = ri.update(sweep(0, 1, 0x7, raw_range, 1024, 3, 50_000_000, with_aux=True,
-                         direct_vrel_raw=864, direct_vrel_uncertainty_raw=0))
-    return rr.points[0]
-
-  def test_selector(self):
-    assert bosch_a_range_offset_fallback_m(CAR.HONDA_CIVIC_BOSCH) == -2.6171875
-    assert bosch_a_range_offset_fallback_m(CAR.HONDA_CRV_5G) == -2.6640625
-    assert bosch_a_range_offset_fallback_m(CAR.HONDA_CRV_HYBRID) == -2.6640625
-    assert bosch_a_range_offset_fallback_m() == -2.6171875
+  def test_constants(self):
+    assert BOSCH_A_RANGE_OFFSET_M == -335.0 / 128.0 == -2.6171875
+    assert bosch_a_range_offset_m(CAR.HONDA_CIVIC_BOSCH) == -2.6171875
+    assert bosch_a_range_offset_m(CAR.HONDA_CRV_5G) == -2.6640625
+    assert bosch_a_range_offset_m(CAR.HONDA_CRV_HYBRID) == -2.6640625
     assert bosch_a_range_offset_m() == -2.6171875
 
-  def test_default_civic_factory_fallback(self):
-    ri = make_radar_interface()  # this test's params store has no BoschARangeOffsetFallback set
-    assert ri.range_offset_m == -2.6171875
-    assert self._dRel(ri).dRel == pytest.approx(1000 / 16.0 - 2.6171875)
+  def test_interface_uses_the_cars_offset(self):
+    assert make_radar_interface().range_offset_m == -2.6171875
 
-  def test_default_crv_factory_fallback(self):
-    crv_cp = CarInterface.get_non_essential_params(CAR.HONDA_CRV_5G)
-    ri = CarInterface.RadarInterface(crv_cp)
-    assert ri.range_offset_m == -2.6640625
-    assert self._dRel(ri).dRel == pytest.approx(1000 / 16.0 - 2.6640625)
-
-  def test_reader_fails_closed(self, monkeypatch):
-    import openpilot.common.params as params_module
-
-    class Broken:
-      def get_bool(self, key):
-        raise RuntimeError("unknown key")
-    monkeypatch.setattr(params_module, "Params", Broken)
-    assert radar_interface_module.bosch_a_range_offset_fallback_enabled() is False
-
-  def test_dynamic_offset_update_civic(self, monkeypatch):
-    monkeypatch.setattr(radar_interface_module, "bosch_a_range_offset_fallback_enabled", lambda: True)
+  def test_0x669_is_not_a_parser_message(self):
+    # A required 0x669 would raise canError whenever the camera does not send it.
     ri = make_radar_interface()
-    assert ri.base_n0 == 335
-    assert ri.range_offset_m == -2.6171875
-
-    # 0x669 with raw 615 -> addend -115 -> n = 220 -> offset = -1.71875 m
-    chassis_frame = CanData(0x669, bytes.fromhex('0002677a77d9000f'), BUS)
-    ri.update(sweep(0, 0, 0x7, 1000, 1024, 1, 0, with_aux=True,
-                    direct_vrel_raw=864, direct_vrel_uncertainty_raw=0,
-                    extra_slots=[chassis_frame]))
-    rr = ri.update(sweep(0, 1, 0x7, 1000, 1024, 3, 50_000_000, with_aux=True,
-                         direct_vrel_raw=864, direct_vrel_uncertainty_raw=0))
-    assert ri.radar_addend == -115
-    assert ri.range_offset_m == -1.71875
-    assert rr.points[0].dRel == pytest.approx(1000 / 16.0 - 1.71875)
-
-  def test_dynamic_offset_update_crv(self, monkeypatch):
-    monkeypatch.setattr(radar_interface_module, "bosch_a_range_offset_fallback_enabled", lambda: True)
-    crv_cp = CarInterface.get_non_essential_params(CAR.HONDA_CRV_5G)
-    ri = CarInterface.RadarInterface(crv_cp)
-    assert ri.base_n0 == 341
-    assert ri.range_offset_m == -2.6640625
-
-    # 0x669 with raw 615 -> addend -115 -> n = 226 -> offset = -1.765625 m
-    chassis_frame = CanData(0x669, bytes.fromhex('0002677a77d9000f'), BUS)
-    ri.update(sweep(0, 0, 0x7, 1000, 1024, 1, 0, with_aux=True,
-                    direct_vrel_raw=864, direct_vrel_uncertainty_raw=0,
-                    extra_slots=[chassis_frame]))
-    rr = ri.update(sweep(0, 1, 0x7, 1000, 1024, 3, 50_000_000, with_aux=True,
-                         direct_vrel_raw=864, direct_vrel_uncertainty_raw=0))
-    assert ri.radar_addend == -115
-    assert ri.range_offset_m == -1.765625
-    assert rr.points[0].dRel == pytest.approx(1000 / 16.0 - 1.765625)
-
-  def test_dynamic_offset_disabled_retains_fallback(self):
-    # toggle OFF (default)
-    ri = make_radar_interface()
-    assert ri.range_offset_m == -2.6171875
-
-    chassis_frame = CanData(0x669, bytes.fromhex('0002677a77d9000f'), BUS)
-    ri.update(sweep(0, 0, 0x7, 1000, 1024, 1, 0, with_aux=True,
-                    direct_vrel_raw=864, direct_vrel_uncertainty_raw=0,
-                    extra_slots=[chassis_frame]))
-    assert ri.radar_addend is None
-    assert ri.range_offset_m == -2.6171875
-
-  def test_dynamic_offset_ignores_invalid_sentinel(self, monkeypatch):
-    monkeypatch.setattr(radar_interface_module, "bosch_a_range_offset_fallback_enabled", lambda: True)
-    ri = make_radar_interface()
-    # 0x669 with raw 0xFFF (4095) sentinel
-    # layout: ((b1 & 0xF) << 8) | b2 = 0xFFF -> b1 |= 0xF, b2 = 0xFF
-    invalid_frame = CanData(0x669, bytes([0, 0x0F, 0xFF, 0, 0, 0, 0, 0]), BUS)
-    ri.update(sweep(0, 0, 0x7, 1000, 1024, 1, 0, with_aux=True,
-                    direct_vrel_raw=864, direct_vrel_uncertainty_raw=0,
-                    extra_slots=[invalid_frame]))
-    assert ri.radar_addend is None
-    assert ri.range_offset_m == -2.6171875
-
-
+    assert 0x669 not in ri.rcp.message_states
+    assert not hasattr(radar_interface_module, "bosch_a_range_offset_fallback_enabled")
 
 class TestVrel:
   def test_direct_aux_vrel_is_preferred_over_range_derivative(self):
@@ -1302,7 +1222,8 @@ class TestLastingCleanStepReAnchors:
     assert (published_at - 6) * self.DT_NANOS * 1e-9 >= BOSCH_A_REANCHOR_MIN_SPAN_S
     assert (published_at - 6) * self.DT_NANOS * 1e-9 <= BOSCH_A_REANCHOR_MIN_SPAN_S + 0.15
 
-  @pytest.mark.parametrize("sigma,existence", [(7, 126), (1, 0)])
+  # Range sigma 20 is above the D-089 range-scaled limit at ~94 m (0.15 x 94 = 14.1), so it stays degraded.
+  @pytest.mark.parametrize("sigma,existence", [(20, 126), (1, 0)])
   def test_negative_control_a_degraded_lasting_step_never_re_anchors(self, sigma, existence):
     ri = make_radar_interface()
     raw = self._birth(ri) - 136
@@ -1310,6 +1231,47 @@ class TestLastingCleanStepReAnchors:
       raw -= self.CLOSING_RAW
       rr = self._drive(ri, i, raw, -2.0, sigma=sigma, existence=existence)
       assert not any(p.measured for p in rr.points)
+
+  def test_a_clean_step_re_anchors_without_the_recovered_flag(self):
+    ri = make_radar_interface()
+    raw = self._birth(ri) - 136
+    for i in range(6, 60):
+      raw -= self.CLOSING_RAW
+      rr = self._drive(ri, i, raw, -2.0)
+      if rr.points and rr.points[0].measured:
+        assert rr.points[0].recovered is False
+
+  def test_d089_far_step_with_range_scaled_sigma_re_anchors_flagged_recovered(self):
+    # Sigma 7 at ~94 m: degraded by BOSCH_A_RANGE_SIGMA_DEGRADED_RAW (4), clean by the range-scaled limit (14.1).
+    # Before D-089 this lead stayed dark (the old negative control); now it comes back flagged for radard's checks.
+    ri = make_radar_interface()
+    raw = self._birth(ri) - 136
+    published = []
+    for i in range(6, 60):
+      raw -= self.CLOSING_RAW
+      rr = self._drive(ri, i, raw, -2.0, sigma=7)
+      if rr.points and rr.points[0].measured:
+        published.append(rr.points[0].recovered)
+    assert published and all(published)
+
+  def test_d089_recovered_flag_clears_after_a_window_of_strictly_clean_sweeps(self):
+    ri = make_radar_interface()
+    raw = self._birth(ri) - 136
+    i = 6
+    while True:
+      raw -= self.CLOSING_RAW
+      rr = self._drive(ri, i, raw, -2.0, sigma=7)
+      i += 1
+      if rr.points and rr.points[0].measured:
+        break
+    assert rr.points[0].recovered is True
+    flags = []
+    for j in range(i, i + BOSCH_A_REANCHOR_WINDOW + 2):
+      raw -= self.CLOSING_RAW
+      rr = self._drive(ri, j, raw, -2.0, sigma=1)
+      flags.append(rr.points[0].recovered)
+    assert flags[:BOSCH_A_REANCHOR_WINDOW - 1] == [True] * (BOSCH_A_REANCHOR_WINDOW - 1)
+    assert flags[BOSCH_A_REANCHOR_WINDOW - 1:] == [False] * 3
 
   def test_negative_control_a_clean_step_that_contradicts_u11_never_re_anchors(self):
     ri = make_radar_interface()

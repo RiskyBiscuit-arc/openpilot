@@ -689,6 +689,7 @@ def make_sm(v_ego: float, desired_accel: float, min_accel: float, *, experimenta
       aEgo=0.0,
       vCruise=100.0,
       standstill=False,
+      gasPressed=False,
       steeringAngleDeg=0.0,
     ),
     "controlsState": SimpleNamespace(
@@ -5188,18 +5189,12 @@ def test_exp_close_lead_floor_does_not_delay_closing_speed_demand():
   assert planner.close_lead_brake_cap_value <= -3.0
 
 
-def _boost_toggles(on):
-  toggles = make_toggles()
-  toggles.gas_override_boost = on
-  return toggles
-
-
-def _boost_planner_run(on, *, lead_one=None, presses=3):
+def _boost_planner_run(*, lead_one=None, presses=3):
   CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
   planner = LongitudinalPlanner(CP, init_v=17.0)
   sm = make_sm(17.0, -0.3, -3.5, experimental_mode=True, lead_one=lead_one)
   sm["carState"].gasPressed = False
-  toggles = _boost_toggles(on)
+  toggles = make_toggles()
   for _ in range(20):
     planner.update(sm, toggles)
   for _ in range(presses):  # each press is a rising edge
@@ -5210,58 +5205,15 @@ def _boost_planner_run(on, *, lead_one=None, presses=3):
   return planner
 
 
-def test_accel_boost_toggle_on_builds_boost_and_off_publishes_none():
-  on = _boost_planner_run(True)
-  off = _boost_planner_run(False)
-  assert on.accel_boost.value > 0.0
-  assert off.accel_boost.value == 0.0
-  assert on.output_a_target > off.output_a_target
+def test_accel_boost_is_always_on_and_builds_boost_after_gas_presses():
+  assert _boost_planner_run().accel_boost.total_boost > 0.0
+  assert _boost_planner_run(presses=0).accel_boost.total_boost == 0.0
 
 
-def test_accel_boost_toggle_off_clears_a_built_boost():
-  planner = _boost_planner_run(True)
-  assert planner.accel_boost.value > 0.0
-  sm = make_sm(17.0, -0.3, -3.5, experimental_mode=True)
-  sm["carState"].gasPressed = False
-  planner.update(sm, _boost_toggles(False))
-  assert planner.accel_boost.value == 0.0
-
-
-def test_accel_boost_toggle_gates_the_lead_departure_assist():
+def test_lead_departure_assist_is_always_on():
   lead = make_lead(status=True, d_rel=70.0, v_lead=19.0, a_lead=0.1, radar=True, model_prob=1.0)
   lead.vRel = 2.0
-  on = _boost_planner_run(True, lead_one=lead, presses=0)
-  off = _boost_planner_run(False, lead_one=lead, presses=0)
-  assert on.exp_lead_departure_weight > 0.0
-  assert off.exp_lead_departure_weight == 0.0
-  assert off.exp_lead_departure_lift == 0.0
-
-
-def test_accel_boost_toggle_off_mid_drive_zeroes_the_lead_departure_state():
-  lead = make_lead(status=True, d_rel=70.0, v_lead=19.0, a_lead=0.1, radar=True, model_prob=1.0)
-  lead.vRel = 2.0
-  planner = _boost_planner_run(True, lead_one=lead, presses=0)
-  assert planner.exp_lead_departure_weight > 0.0
-  sm = make_sm(17.0, -0.3, -3.5, experimental_mode=True, lead_one=lead)
-  sm["carState"].gasPressed = False
-  planner.update(sm, _boost_toggles(False))
-  assert planner.exp_lead_departure_weight == 0.0
-  assert planner.exp_lead_departure_lift == 0.0
-
-
-def test_accel_boost_defaults_on_when_the_toggle_attribute_is_missing():
-  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
-  planner = LongitudinalPlanner(CP, init_v=17.0)
-  sm = make_sm(17.0, -0.3, -3.5, experimental_mode=True)
-  toggles = make_toggles()  # no gas_override_boost attribute
-  for _ in range(20):
-    planner.update(sm, toggles)
-  for _ in range(2):
-    sm["carState"].gasPressed = True
-    planner.update(sm, toggles)
-    sm["carState"].gasPressed = False
-    planner.update(sm, toggles)
-  assert planner.accel_boost.value > 0.0
+  assert _boost_planner_run(lead_one=lead, presses=0).exp_lead_departure_weight > 0.0
 
 
 # report §12.3 P5 / P6, baked in 2026-10-04 (STATUS 204)
@@ -5313,3 +5265,29 @@ def test_soft_stop_floor_softens_only_with_room():
 ])
 def test_soft_stop_floor_stands_down(lead_kwargs, v_ego):
   assert longitudinal_planner_module.get_soft_stop_floor(make_lead(**lead_kwargs), v_ego) is None
+
+
+def _closing_lead_run(stock_brake_feel):
+  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  planner = LongitudinalPlanner(CP, init_v=10.0)
+  lead = make_lead(status=True, d_rel=22.0, v_lead=9.0, model_prob=0.99, radar=True)
+  lead.vRel = -1.0
+  sm = make_sm(10.0, desired_accel=1.0, min_accel=-3.5, experimental_mode=False, tracking_lead=True, lead_one=lead)
+  toggles = make_toggles()
+  toggles.stock_brake_feel = stock_brake_feel
+  out = []
+  for _ in range(40):
+    planner.update(sm, toggles)
+    out.append(planner.output_a_target)
+  return planner, out
+
+
+def test_stock_brake_feel_coasts_while_closing_on_the_lead():
+  # 2026-10-07 owner: a true coast instead of throttle while closing in on the lead, then the stock brake law.
+  planner, on = _closing_lead_run(True)
+  _, off = _closing_lead_run(False)
+  assert planner.lead_coast_active
+  # Off, the planner goes back on the gas while still 1 m/s faster than the lead; on, it coasts and never throttles.
+  assert max(off[-10:]) > 0.5
+  assert max(on) <= 0.0 + 1e-6
+  assert min(on[-10:]) >= longitudinal_planner_module.LEAD_COAST_MIN - 1e-6
