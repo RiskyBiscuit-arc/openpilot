@@ -42,3 +42,25 @@ def test_not_armed_in_edge_lane_slow_or_invalid():
 
 def test_too_close_to_finish_a_lane_change_clears():
   assert not prompt(nav(dist=40.0), v=13.0)["armed"]
+
+
+def lane_nav(direction="right", edge=True, shared=False, dist=200.0):
+  n = nav(dist=dist)
+  n.update(activeLaneDirection=direction, activeLaneAtRoadEdge=edge, hasSharedSameSideLane=shared)
+  return n
+
+
+def test_turn_only_lane_prompts_earlier():
+  assert not prompt(nav(dist=200.0))["armed"]
+  p = prompt(lane_nav())
+  assert p["armed"] and p["turn_lane"]
+
+
+def test_shared_or_wrong_side_lane_is_not_turn_only():
+  assert not prompt(lane_nav(shared=True))["turn_lane"]
+  assert not prompt(lane_nav(direction="left"))["turn_lane"]
+  assert not prompt(lane_nav(edge=False))["turn_lane"]
+
+
+def test_turn_only_lane_still_needs_a_lane_to_move_into():
+  assert not prompt(lane_nav(), widths={"left": 3.5, "right": 0.0})["armed"]
