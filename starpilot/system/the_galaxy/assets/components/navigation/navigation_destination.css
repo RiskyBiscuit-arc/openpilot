@@ -592,6 +592,22 @@
     min-width: 0;
     width: calc(100% - var(--padding-xl));
   }
+
+  .navigation-summary-widget { padding: var(--padding-sm); }
+  .navigation-summary-title { margin-bottom: var(--padding-xs); }
+  .navigation-summary-widget .summary-row {
+    display: inline-grid;
+    grid-template-columns: auto auto;
+    margin-right: var(--padding-sm);
+  }
+  .navigation-summary-widget .summary-row .label { display: none; }
+  .navigation-summary-widget .summary-row .emoji { height: 1.5rem; width: 1.5rem; }
+  .navigation-preferences {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .navigation-pref-pill { flex: 0 0 auto; white-space: nowrap; }
 }
 
 /* ――― Navigation settings panel ――― */

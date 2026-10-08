@@ -438,6 +438,17 @@ export function NavDestination() {
           () => state.selectedRoute?.routeId ?? null
         );
 
+        if (window.innerWidth <= 768 && window.matchMedia("(orientation: portrait)").matches) {
+          requestAnimationFrame(() => {
+            const box = document.querySelector("#infobox .navigation-summary-widget");
+            const start = [state.lastPosition.longitude, state.lastPosition.latitude];
+            if (!box || !Number.isFinite(start[0]) || !Number.isFinite(coords?.[0])) return;
+            const top = Math.round(box.getBoundingClientRect().bottom + 16);
+            if (window.innerHeight - top < 200) return;
+            map.fitBounds([start, coords], { padding: { top, bottom: 40, left: 40, right: 40 }, duration: 600 });
+          });
+        }
+
         if (resume && map) {
           requestAnimationFrame(() => {
             map.flyTo({
