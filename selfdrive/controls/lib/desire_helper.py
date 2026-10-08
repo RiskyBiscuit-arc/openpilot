@@ -1,13 +1,15 @@
 import json
 import math
+import time
 
 import numpy as np
 
 from cereal import log
 from openpilot.common.constants import CV
-from openpilot.common.params import Params
+from openpilot.common.params import Params, UnknownKeyName
 from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.common.vision_bsm import get_fresh_vasm_state
+from openpilot.starpilot.controls.lib.nav_lane_prompt import nav_lane_move_prompt
 
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
@@ -86,6 +88,9 @@ class DesireHelper:
     self.turn_recoiled = False
     self._nav_instruction_state_raw: object = None
     self._nav_instruction_state: dict[str, object] = {}
+    self._prompt_last = None
+    self._prompt_publish_disabled = False
+    self._prompt_last_t = 0.0
 
   def _update_nav_params(self):
     raw = self.params_memory.get("NavInstructionState") or {}
@@ -120,6 +125,26 @@ class DesireHelper:
     elif lane_change_direction == LaneChangeDirection.right:
       return bool(getattr(carstate, "rightBlindspot", False) or vasm_right)
     return False
+
+  def _publish_lane_move_prompt(self, carstate, starpilotPlan, starpilot_toggles, lateral_active):
+    if self._prompt_publish_disabled:
+      return
+    self._update_nav_params()
+    now = time.monotonic()
+    state = self._nav_instruction_state if (lateral_active and getattr(starpilot_toggles, "nav_desires_allowed", False)) else {}
+    widths = {"left": getattr(starpilotPlan, "laneWidthLeft", None), "right": getattr(starpilotPlan, "laneWidthRight", None)}
+    prompt = nav_lane_move_prompt(state, carstate.vEgo, starpilot_toggles.minimum_lane_change_speed, widths,
+                                  starpilot_toggles.lane_detection_width, now)
+    key = (prompt["armed"], prompt["side"], prompt["kind"])
+    # rewrite every 1 s while armed so the UI can drop a stale prompt by timestamp
+    if key == self._prompt_last and not (prompt["armed"] and now - self._prompt_last_t >= 1.0):
+      return
+    self._prompt_last, self._prompt_last_t = key, now
+    try:
+      self.params_memory.put_nonblocking("NavLaneMovePrompt", prompt)
+    except UnknownKeyName:
+      # binary built before the key existed: drop the prompt rather than take down controlsd
+      self._prompt_publish_disabled = True
 
   @staticmethod
   def _nav_keep_direction_is_clear(carstate, lane_change_direction, params_memory=None, v_asm_enabled=False):
@@ -360,6 +385,7 @@ class DesireHelper:
 
   def update(self, carstate, lateral_active, lane_change_prob, starpilotPlan, starpilot_toggles, controls_enabled=None, modeldata=None):
     self._last_modeldata = modeldata
+    self._publish_lane_move_prompt(carstate, starpilotPlan, starpilot_toggles, lateral_active)
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < starpilot_toggles.minimum_lane_change_speed

@@ -1,0 +1,59 @@
+import numpy as np
+
+# Starting values, not tuned: replay of routes 2f2/2f5 then Peter's drive decide them.
+EXIT_PROMPT_SECONDS = 60.0
+EXIT_PROMPT_MIN_M, EXIT_PROMPT_MAX_M = 400.0, 1600.0
+TURN_PROMPT_SECONDS = 10.0
+TURN_PROMPT_MIN_M, TURN_PROMPT_MAX_M = 60.0, 200.0
+
+LEFT_MODIFIERS = ("left", "sharpleft", "slightleft")
+RIGHT_MODIFIERS = ("right", "sharpright", "slightright")
+
+
+def prompt_window_m(kind: str, v_ego: float) -> float:
+  if kind == "exit":
+    return float(np.clip(v_ego * EXIT_PROMPT_SECONDS, EXIT_PROMPT_MIN_M, EXIT_PROMPT_MAX_M))
+  return float(np.clip(v_ego * TURN_PROMPT_SECONDS, TURN_PROMPT_MIN_M, TURN_PROMPT_MAX_M))
+
+
+def nav_lane_move_prompt(nav_state: dict, v_ego: float, min_speed: float, adjacent_lane_width: dict,
+                         lane_detection_width: float, now: float) -> dict:
+  """Dict for NavLaneMovePrompt. armed=False means the UI shows nothing."""
+  out = {"armed": False, "side": "", "kind": "", "distance_m": 0.0, "window_m": 0.0, "ts": now}
+  if not nav_state or not nav_state.get("valid", False):
+    return out
+
+  maneuver_type = str(nav_state.get("maneuverType", "")).lower()
+  modifier = str(nav_state.get("maneuverModifier", "")).replace(" ", "").lower()
+  if modifier in LEFT_MODIFIERS:
+    side = "left"
+  elif modifier in RIGHT_MODIFIERS:
+    side = "right"
+  else:
+    return out
+
+  # fork keeps its own keepLeft/keepRight path; only exits and plain turns get a move-over prompt
+  if maneuver_type == "off ramp":
+    kind = "exit"
+  elif maneuver_type in ("turn", "end of road") and modifier in ("left", "right", "sharpleft", "sharpright"):
+    kind = "turn"
+  else:
+    return out
+
+  try:
+    distance = float(nav_state.get("maneuverDistance", 0.0))
+  except (TypeError, ValueError):
+    return out
+
+  window = prompt_window_m(kind, v_ego)
+  out.update(side=side, kind=kind, distance_m=distance, window_m=window)
+  if not 0.0 < distance <= window or v_ego < min_speed:
+    return out
+
+  # No adjacent lane on that side (width below the detection threshold): already in the edge lane
+  width = adjacent_lane_width.get(side)
+  if width is not None and width < lane_detection_width:
+    return out
+
+  out["armed"] = True
+  return out
