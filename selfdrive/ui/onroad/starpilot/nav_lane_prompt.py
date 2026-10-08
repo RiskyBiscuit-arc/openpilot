@@ -34,7 +34,14 @@ def parse_prompt(raw, now: float) -> dict | None:
     distance = float(raw.get("distance_m", 0.0) or 0.0)
   except (TypeError, ValueError):
     return None
-  return {"side": side, "kind": raw.get("kind", "turn"), "distance_m": distance, "blocked": bool(raw.get("blocked", False)), "turn_lane": bool(raw.get("turn_lane", False)), "ts": float(raw["ts"])}
+  return {
+    "side": side,
+    "kind": raw.get("kind", "turn"),
+    "distance_m": distance,
+    "blocked": bool(raw.get("blocked", False)),
+    "turn_lane": bool(raw.get("turn_lane", False)),
+    "ts": float(raw["ts"]),
+  }
 
 
 class NavLaneMovePromptRenderer(Widget):
