@@ -245,12 +245,12 @@ class TestPowerMonitoring:
                                        started_seen, self.toggles()), \
                     f"Should shutdown after {DELAY_SHUTDOWN_TIME_S} seconds offroad time"
 
-  # StarPilot: UploadRlogs holds only the offroad timer, only while the last drive's rlogs are pending, and at most
+  # StarPilot: rlog upload (on whenever parked, whatever UploadRlogs says) holds only the offroad timer, only while the last drive's rlogs are pending, and at most
   # RLOG_UPLOAD_HOLD_MAX_S past it
   @pytest.mark.parametrize("pending, upload_rlogs, past_timeout, expect_shutdown", [
     (True, True, 60, False),
     (False, True, 60, True),
-    (True, False, 60, True),
+    (True, False, 60, False),
     (True, True, RLOG_UPLOAD_HOLD_MAX_S + 60, True),
   ])
   def test_offroad_timeout_held_for_rlog_upload(self, mocker, pending, upload_rlogs, past_timeout, expect_shutdown):
