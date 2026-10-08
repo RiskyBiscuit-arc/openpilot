@@ -145,16 +145,16 @@ def test_stock_feel_toggle_is_wired_and_off_by_default():
 
 def test_stock_feel_depth_follows_stock_by_ttc():
   # 100 m closing 8 m/s (TTC 12.5): planner -3.0 held at stock's ~-0.93; 30 m closing 10 m/s (TTC 3): ~-2.37
-  assert lp.stock_feel_target((_lead(100.0, -8.0),), -3.0, -3.0, 0.05) == pytest.approx(
-    float(lp.np.interp(12.5, lp.STOCK_FEEL_DEPTH_BP, lp.STOCK_FEEL_DEPTH_V)))
-  assert lp.stock_feel_target((_lead(30.0, -10.0),), -3.0, -3.0, 0.05) == pytest.approx(
-    float(lp.np.interp(3.0, lp.STOCK_FEEL_DEPTH_BP, lp.STOCK_FEEL_DEPTH_V)))
+  d12 = float(lp.np.interp(12.5, lp.STOCK_FEEL_DEPTH_BP, lp.STOCK_FEEL_DEPTH_V))
+  d3 = float(lp.np.interp(3.0, lp.STOCK_FEEL_DEPTH_BP, lp.STOCK_FEEL_DEPTH_V))
+  assert lp.stock_feel_target((_lead(100.0, -8.0),), d12, -3.0, 0.05) == pytest.approx(d12)
+  assert lp.stock_feel_target((_lead(30.0, -10.0),), d3, -3.0, 0.05) == pytest.approx(d3)
   assert lp.stock_feel_target((_lead(100.0, -8.0),), -0.58, -0.6, 0.05) == pytest.approx(-0.6)  # shallower, slow: untouched
 
 
 def test_stock_feel_ignores_the_gap_and_lead_braking_gates_like_stock():
   # 12 m at 20 m/s (inside 1.5 s of gap) closing 4 m/s, lead braking -3: TTC 3 s, still stock's depth
-  assert lp.stock_feel_target((_lead(12.0, -4.0, a=-3.0),), -3.5, -3.5, 0.05) > -2.5
+  assert lp.stock_feel_target((_lead(12.0, -4.0, a=-3.0),), -2.0, -3.5, 0.05) > -2.5
 
 
 def test_stock_feel_deepens_at_stock_rate():
@@ -176,6 +176,21 @@ def test_stock_feel_keeps_planner_depth_but_limits_the_step(leads):
   assert lp.stock_feel_target(leads, -3.5, -3.5, 0.05) == -3.5
   assert lp.stock_feel_target(leads, 0.0, -3.5, 0.05) == pytest.approx(-lp.STOCK_FEEL_JERK_OUTSIDE * 0.05)
   assert lp.stock_feel_target(leads, -2.0, -1.0, 0.05) == -1.0
+
+
+def test_stock_feel_does_not_cut_a_brake_already_under_way():
+  # 2f7 26:38: planner at -1.02 for a car 25 m ahead when the closing crossed 0.5 m/s (TTC ~30 s, table -0.35).
+  leads = (_lead(24.7, -0.82),)
+  out, a = [], -1.02
+  for _ in range(12):  # 0.6 s
+    a = lp.stock_feel_target(leads, a, -1.05, 0.05)
+    out.append(a)
+  assert out[0] == pytest.approx(-1.02 + lp.STOCK_FEEL_CAP_RELEASE_JERK * 0.05)
+  assert all(b >= x - 1e-9 for x, b in zip(out, out[1:]))
+  assert out[-1] == pytest.approx(-1.02 + 12 * lp.STOCK_FEEL_CAP_RELEASE_JERK * 0.05)
+  # the planner's own easing still passes straight through, and a new brake still stops at the table
+  assert lp.stock_feel_target(leads, -1.02, -0.2, 0.05) == -0.2
+  assert lp.stock_feel_target(leads, -0.35, -1.05, 0.05) == pytest.approx(-0.35)
 
 
 def test_stock_feel_depth_table_is_monotone():

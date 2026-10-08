@@ -390,6 +390,14 @@ STOCK_FEEL_MIN_CLOSING = 0.5  # m/s
 # a simulated gap crossed TTC 2 s or a lead began opening (e5 -11.9, dfa -33, dfb -15 m/s^3). Stock's own p98 rate is
 # 2-3.4 m/s^3 at every TTC; 5 reaches -3.5 from -1.85 in 0.33 s.
 STOCK_FEEL_JERK_OUTSIDE = 5.0  # m/s^3
+# Takeover hold (owner 2026-10-08, "let's try that fix"; replay and limited road evidence only). The depth table used to
+# cut a brake already under way: on 2f7 26:38 (1598.3) the planner was at -1.02 for a car 25 m ahead when the closing
+# speed crossed STOCK_FEEL_MIN_CLOSING; at TTC ~30 s the table allows -0.35, so the brake eased to -0.36 in 0.4 s and
+# grabbed again to -1.11 half a second later when that car braked (Peter bookmarked it as a jerk). Closed-loop replay of
+# 2f5 747.85 showed the same ease-then-grab (+0.62). Now a brake already deeper than the cap is never cut by the cap: the
+# cap bleeds back toward the table at STOCK_FEEL_CAP_RELEASE_JERK, while the planner's own easing passes through as
+# before. The table and the deepening rates are unchanged.
+STOCK_FEEL_CAP_RELEASE_JERK = 0.3  # m/s^3
 # Lead stopping (owner 2026-10-07, 000002f2, proposed; static only). The depth table follows TTC only, so a lead braking
 # hard to a stop looked like a steady slow lead: on 2f2 1099 and 1483 the target sat at the -2.3 cap for 3-4 s while the
 # gap fell 33 -> 6 m, then dropped to -3.5 at TTC 2 s and the car stopped 2.5 / 3.4 m behind. With this on, when a closing
@@ -573,12 +581,20 @@ def stock_feel_emergency(leads, v_ego: float, active: bool) -> bool:
   return need >= STOCK_FEEL_EMERGENCY_NEED and need > -depth
 
 
+def stock_feel_held_cap(prev: float, cap: float, dt: float) -> float:
+  """The stock-feel cap, except that a brake already deeper than it (prev) is only let off at STOCK_FEEL_CAP_RELEASE_JERK."""
+  if prev < cap:
+    return float(min(cap, prev + STOCK_FEEL_CAP_RELEASE_JERK * dt))
+  return float(cap)
+
+
 def stock_feel_target(leads, prev: float, target: float, dt: float, v_ego: float = 0.0,
                      emergency: bool = False) -> float:
   """D-086 stock Honda ACC brake law: while a lead is closing and the worst TTC is over STOCK_FEEL_TTC_FLOOR_S, the
   target goes no deeper than stock's depth at that TTC and deepens no faster than stock's rate; otherwise the planner's
   depth is kept and deepens at most STOCK_FEEL_JERK_OUTSIDE. STOCK_FEEL_LEAD_STOP: when stopping behind a braking lead
-  needs more than the table's depth, the cap is that need instead, deepening at STOCK_FEEL_JERK_OUTSIDE. emergency
+  needs more than the table's depth, the cap is that need instead, deepening at STOCK_FEEL_JERK_OUTSIDE. A brake already
+  deeper than the cap is let off no faster than STOCK_FEEL_CAP_RELEASE_JERK (stock_feel_held_cap). emergency
   (stock_feel_emergency): the planner's target passes through untouched."""
   if emergency:
     return float(target)
@@ -589,8 +605,9 @@ def stock_feel_target(leads, prev: float, target: float, dt: float, v_ego: float
   if STOCK_FEEL_LEAD_STOP:
     need = lead_stop_need(leads, v_ego)
     if need > -depth:
-      return brake_onset_limited_target(prev, max(target, -min(need, 3.5)), dt, STOCK_FEEL_JERK_OUTSIDE)
-  target = max(target, depth)
+      return brake_onset_limited_target(prev, max(target, stock_feel_held_cap(prev, -min(need, 3.5), dt)), dt,
+                                        STOCK_FEEL_JERK_OUTSIDE)
+  target = max(target, stock_feel_held_cap(prev, depth, dt))
   return brake_onset_limited_target(prev, target, dt, float(np.interp(ttc, STOCK_FEEL_JERK_BP, STOCK_FEEL_JERK_V)))
 
 
