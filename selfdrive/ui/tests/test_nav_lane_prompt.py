@@ -83,3 +83,14 @@ def test_stale_prompt_stops_drawing_between_reads(widget, monkeypatch):
   w._last_update = clock[0]
   w._render(nav_lane_prompt.rl.Rectangle(0, 0, 536, 240))
   assert drawn == []
+
+
+def test_blocked_flag_is_carried(widget):
+  w, ui, _ = widget
+  ui.params_memory.values["NavLaneMovePrompt"] = prompt(blocked=True)
+  w._update_state()
+  assert w._prompt["blocked"] is True
+  ui.params_memory.values["NavLaneMovePrompt"] = prompt()
+  w._last_update = -1e9
+  w._update_state()
+  assert w._prompt["blocked"] is False

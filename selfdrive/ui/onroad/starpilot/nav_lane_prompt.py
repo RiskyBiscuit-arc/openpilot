@@ -34,7 +34,7 @@ def parse_prompt(raw, now: float) -> dict | None:
     distance = float(raw.get("distance_m", 0.0) or 0.0)
   except (TypeError, ValueError):
     return None
-  return {"side": side, "kind": raw.get("kind", "turn"), "distance_m": distance, "turn_lane": bool(raw.get("turn_lane", False)), "ts": float(raw["ts"])}
+  return {"side": side, "kind": raw.get("kind", "turn"), "distance_m": distance, "blocked": bool(raw.get("blocked", False)), "turn_lane": bool(raw.get("turn_lane", False)), "ts": float(raw["ts"])}
 
 
 class NavLaneMovePromptRenderer(Widget):
@@ -73,7 +73,7 @@ class NavLaneMovePromptRenderer(Widget):
     top = rl.Vector2(cx - direction * size / 2, cy - size / 2)
     bottom = rl.Vector2(cx - direction * size / 2, cy + size / 2)
     a, b = (bottom, top) if side == "left" else (top, bottom)
-    rl.draw_triangle(tip, a, b, rl.Color(255, 200, 40, 255))
+    rl.draw_triangle(tip, a, b, rl.Color(255, 90, 70, 255) if self._prompt and self._prompt.get("blocked") else rl.Color(255, 200, 40, 255))
 
   def _render(self, rect: rl.Rectangle) -> None:
     self._update_state()
@@ -84,7 +84,10 @@ class NavLaneMovePromptRenderer(Widget):
     side = prompt["side"]
     title = f"Move to the {side} lane"
     where = "exit" if prompt["kind"] == "exit" else "turn"
-    detail = f"Blinker to confirm  -  {where} in {_format_distance(prompt['distance_m'], ui_state.is_metric)}"
+    blocked = prompt["blocked"]
+    accent = rl.Color(255, 90, 70, 220) if blocked else rl.Color(255, 200, 40, 200)
+    lead = "Blinker to confirm" if not blocked else f"Blind spot occupied ({side})"
+    detail = f"{lead}  -  {where} in {_format_distance(prompt['distance_m'], ui_state.is_metric)}"
     title_size, detail_size = 30, 20
 
     left_safe, right_margin = 96, 12
@@ -93,7 +96,7 @@ class NavLaneMovePromptRenderer(Widget):
     x, y = int(rect.x + left_safe), self._top(rect)
     box = rl.Rectangle(x, y, width, height)
     rl.draw_rectangle_rounded(box, 0.3, 10, rl.Color(7, 11, 18, 232))
-    rl.draw_rectangle_rounded_lines_ex(box, 0.3, 10, 2, rl.Color(255, 200, 40, 200))
+    rl.draw_rectangle_rounded_lines_ex(box, 0.3, 10, 2, accent)
 
     arrow_cx = x + 38
     pulse = 1.0 + 0.12 * math.sin(time.monotonic() * 6.0)
