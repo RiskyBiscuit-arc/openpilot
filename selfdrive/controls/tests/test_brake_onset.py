@@ -306,3 +306,39 @@ def test_lead_coast_to_brake_builds_at_stock_rate_unless_close():
   assert not lp.brake_onset_ttc((_lead(3.0, -2.0),)) > lp.STOCK_FEEL_TTC_FLOOR_S  # 1.5 s: planner depth, no limit here
   # closing faster than 0.5 m/s: the stock law's own TTC rate applies instead (2 m/s^3 at TTC 2.5 s), not 1 m/s^3
   assert lp.brake_onset_ttc((_lead(5.0, -2.0),), lp.STOCK_FEEL_MIN_CLOSING) != float('inf')
+
+
+def test_lead_coast_gas_off_only_while_the_coast_ceiling_binds():
+  # D-091: 2f8's -0.30..-0.40 coast targets became brake taps on the Civic; the plan now flags them as a coast
+  c = -0.33
+  assert lp.lead_coast_gas_off(c, 0.5, c, False)                     # planner wants gas, the ceiling holds it at c
+  assert lp.lead_coast_gas_off(c, c, c, False)
+  assert not lp.lead_coast_gas_off(c, -0.8, -0.8, False)             # a deeper planner brake is a brake
+  assert not lp.lead_coast_gas_off(0.0, 0.5, 0.0, False)             # hold is a throttle cap, not a coast
+  assert not lp.lead_coast_gas_off(None, 0.5, c, False)
+  assert not lp.lead_coast_gas_off(c, 0.5, c, True)                  # emergency
+  assert not lp.lead_coast_gas_off(c, 0.5, 0.2, False)               # gas is gas
+
+
+def test_lead_coast_gas_off_covers_the_release():
+  # 2f8 replay: with the flag tied to the coast level, the target still easing back up from the ceiling (brake-release
+  # limits) after the coast ended, or lagging a ceiling that rose with speed, went out as 0.2-0.5 s brake taps
+  assert lp.lead_coast_gas_off(-0.20, 0.3, -0.44, False)             # ceiling rising back, output lagging below it
+  assert lp.lead_coast_gas_off(-0.28, -0.1, -0.35, False)            # coast ceiling rose; output held by the release limit
+  assert not lp.lead_coast_gas_off(-0.28, -0.6, -0.35, False)        # ...unless the planner itself wants the brake
+
+
+def test_lead_coast_gas_off_exit_hysteresis():
+  # 2f8 replay: with one margin the flag flickered while the planner hovered at the ceiling (brake-light flicker)
+  c = -0.33
+  assert not lp.lead_coast_gas_off(c, c - 0.08, c, False, active=False)
+  assert lp.lead_coast_gas_off(c, c - 0.08, c, False, active=True)
+  assert not lp.lead_coast_gas_off(c, c - 0.15, c, False, active=True)
+
+
+def test_lead_coast_flag_is_published_and_reaches_the_actuators():
+  from pathlib import Path
+  src = Path(lp.__file__).read_text()
+  assert 'longitudinalPlan.leadCoast = self.lead_coast_request' in src
+  ctl = (Path(lp.__file__).parents[2] / 'controls' / 'controlsd.py').read_text()
+  assert 'actuators.coast = bool(CC.longActive and long_plan.leadCoast' in ctl

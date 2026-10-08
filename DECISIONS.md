@@ -2036,3 +2036,40 @@ As a result, the commits were properly cherry-picked. The conflicts in `starpilo
   -1.19) by easing a radar -> camera step. Extra brakes in these routes are not at handoffs. Do not retry it without a case where a
   handoff step is the cause; if retried, never ease toward the camera when it is the only remaining sensor (D-042).
 - D-041/D-042 hold: the camera check only withholds points the shipped build never had.
+
+## D-090 — Radar–camera pairing: a track whose U11 vRel sits on the ±12 m/s rail is judged by its own range slope when that slope is beyond the rail (STATUS 226, 2026-10-08, replay only, not driven)
+
+- **Finding (route 000002f8--2db4adac1a, bookmark 1, ~1:30).** Radar track 52, vRel railed at -12.00 while its range slope read -19.6
+  m/s (decaying to -13 as the car braked), passed the strict vision-match velocity gate by 0.14 m/s (|-12 + 13.38 - 11.24| = 9.86 < 10)
+  because the rail hid the real closing. The loose preferred hold (13 m/s) then kept it. The car braked at -2.3 from 30 to 17 mph on an
+  object that slid off the path; the camera's lead was a different car ~70 m ahead.
+- **Shipped default on, IQ-stop-C only (owner: "Yeah let's try both"):** `RAIL_RANGE_VEL_CHECK`. For Honda Bosch A only, when vRel is
+  within 0.05 of the U11 rail and the track's own range slope (long window: >= 15 samples, 0.6-1.5 s, RMS <= 1.0 m; else the young-track
+  window: >= 6 samples, >= 0.35 s, RMS <= 0.6 m) has the same sign and is larger, `track_matches_vision` uses that slope instead of vRel,
+  and the loose preferred hold does not apply to the track. Off the rail, or with no clean slope, nothing changes. The published vRel is
+  not touched, and no point is deleted: the track just is not paired with the camera lead (D-041/D-042 hold).
+- **Evidence.** Open-loop scan on 7 routes: every changed episode moves the lead toward the camera's speed (2f8 BM1 vLead 1.4 -> 11.9;
+  268 702.5 s, radar 89 m vs camera 78.7 m; 26b removes vLead -9.5 and -5.0 while disengaged). No real slow lead lost. Closed-loop
+  replay of 2f8 BM1: holds -1.00 over 91.0-91.5 s instead of ramping to -1.86, then brakes -2.1..-2.3 at 92.5-93.0 because the camera
+  lead itself slowed (12 -> 5 m/s, likely turning off). **Partial:** fix 2 softens and delays the first second of BM1; the rest of
+  that slowdown follows a real slowing car.
+- Do not widen the rail band or drop the same-sign/larger test without a replay; a slope merely different from vRel is ordinary noise.
+
+## D-091 — StockBrakeFeel's lead coast becomes a true gas-off on Honda Bosch (STATUS 226, 2026-10-08, replay only, not driven)
+
+- **Finding (2f8, bookmark 2 and whole route).** SBF's coast caps the target near -0.33 for ~2 s when the lead closes by 0.5-1 m/s. The
+  Civic Bosch carcontroller requests the brake (with brake lights) once the road-load-adjusted force drops below -0.12, so the "coast"
+  went out as a brake tap. Logged car: 928 s gas, 460 s brake, 66 s true coast; replay flips 49 with SBF on vs 9 off.
+- **Shipped default on, IQ-stop-C only:** `LEAD_COAST_GAS_OFF`. While the lead-coast ceiling is below zero and the planner's own
+  target (before the ceiling) is at or above it (within 0.05; no emergency; published target <= 0), `longitudinalPlan.leadCoast` is
+  set. This covers the coast's release too. controlsd passes it as `actuators.coast` only in
+  the pid state; the Honda Bosch carcontroller then sends gas off (min gas, no BRAKE_REQUEST, no brake lights) while accel is in
+  [-0.6, 0] and not stopping, and keeps the gas learner out of those frames. Any deeper planner brake clears the flag and brakes as
+  before; the coast never replaces a real brake. Exit hysteresis: once on, the flag holds until the planner wants more than 0.10
+  beyond the ceiling (`LEAD_COAST_GAS_OFF_EXIT_MARGIN`).
+- **Tried, did not work:** tying the flag to the COAST level and the published target (each coast ended in a 0.2-0.5 s brake tap,
+  55 light taps vs 31 without the fix in the 2f8 Civic-mode emulation); the planner-target rule without hysteresis (flicker, 30 taps).
+  Shipped rule: 13 taps, gas<->brake flips 122 -> 43 (SBF off: 56 flips, 10 taps), braking 528 -> 364 s. Replay emulation only.
+- **Caveat.** Stock's coast frames carry ACCEL_COMMAND p50 -0.39 with no brake request, so the level matches stock; but while following
+  with its set speed out of the way, stock eases off with a light brake request more often than it coasts (Job/Jason, 2026-10-07).
+  If the next drive shows gaps opening too fast in light closing, the margin or the -0.6 floor is the lever, not removing the coast.

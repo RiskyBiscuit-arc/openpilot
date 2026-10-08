@@ -691,6 +691,24 @@ RECOVERED_CAM_DROP_FRAMES = 10
 RECOVERED_RANGE_SLOPE_TOL_MPS = 3.0
 RECOVERED_RANGE_SLOPE_MAX_RMS_M = 1.0
 
+# RAIL_RANGE_VEL_CHECK (D-090). On Bosch-A a vRel at the U11 rail (|vRel| >= BOSCH_A_U11 rail - RAIL_RANGE_VEL_RAIL_EPS)
+# is a clamp, not a speed: the true closing can be anywhere beyond it. track_matches_vision compared that clamp with
+# the camera, so a nearly stopped object read as vLead ~1.4 and passed vel_limit 10 against a 12 m/s camera car by
+# 0.14 m/s. Route 000002f8 1:30.4-1:34.6 (owner-bookmarked "weird slowdown", replay-reproduced): track 52 at -12.00
+# closed 86 -> 48 m at ~16.5 m/s while the camera car (prob 0.98) held 65-76 m at 11-12 m/s; the strict gate took it
+# at 1:30.3 (|-12 + 13.38 - 11.24| = 9.86), the preferred gate (vel 13) kept it, and the planner braked to -2.3.
+# Here a railed track's own range slope stands in for the clamp, and only when the slope lies BEYOND the rail in the
+# same direction (the only thing the clamp can hide) and the fit is clean: the D-089 long fit (0.6-1.5 s, RMS <= 1.0
+# m), else the young-track fit since birth (YOUNG_TRACK_* limits). Any other case keeps vRel, so a track can only
+# lose a pairing when its own range says it is moving >= vel_limit away from the camera's speed. That drops the
+# radar match and leaves the vision lead (the 000001fe 35:36 risk the vel_sane note above warns of), so the D-041
+# exemption NEWBORN_RANGE_CLOSING_EXEMPT still runs after it unchanged.
+# The same railed track also loses match_vision_to_track's loose preferred-track hold (dist 0.40, vel 13), which exists
+# for a semi that misses the strict gate by a small margin: on 2f8 the slope fell to -15.3 .. -13.0 as the logged ego
+# braked for this very track, and vel 13 let it back at 1:31.6 (12.98) for the rest of the event.
+RAIL_RANGE_VEL_CHECK = True
+RAIL_RANGE_VEL_RAIL_EPS = 0.05
+
 
 def recovered_cam_agrees(rpt, leads_v3, model_v_ego: float) -> bool | None:
   """True / False when a confident camera lead agrees / disagrees with the point, None with no confident camera lead."""
@@ -802,6 +820,34 @@ def young_range_genuinely_closing(track, v_ego: float) -> bool:
   if track.cnt == 0:
     return True  # never measured: vRel is the fit of these same ranges, so comparing them proves nothing
   return abs(float(slope) - float(track.vRel)) <= NEWBORN_RANGE_CLOSING_VREL_TOL
+
+
+def rail_range_vrel(track) -> float | None:
+  """RAIL_RANGE_VEL_CHECK: the clean range slope of a track whose vRel sits on the U11 rail, when that slope lies
+  beyond the rail in the same direction; else None (use vRel)."""
+  if not RAIL_RANGE_VEL_CHECK or track is None:
+    return None
+  v_rel = float(track.vRel)
+  if not (v_rel <= BOSCH_A_U11_LOW_RAIL_MPS + RAIL_RANGE_VEL_RAIL_EPS or v_rel >= BOSCH_A_U11_HIGH_RAIL_MPS - RAIL_RANGE_VEL_RAIL_EPS):
+    return None
+  slope = None
+  if len(track.range_hist_long) >= RANGE_VREL_LONG_SAMPLES:
+    a = np.array(track.range_hist_long, dtype=np.float64)
+    ts = a[:, 0] - a[-1, 0]
+    if RANGE_VREL_LONG_MIN_SPAN_S <= ts[-1] - ts[0] <= RANGE_VREL_LONG_MAX_SPAN_S:
+      k, b = np.polyfit(ts, a[:, 1], 1)
+      if float(np.sqrt(((a[:, 1] - (b + k * ts)) ** 2).mean())) <= RECOVERED_RANGE_SLOPE_MAX_RMS_M:
+        slope = float(k)
+  if slope is None and track.t_last - track.t_first <= YOUNG_TRACK_MAX_AGE_S and len(track.young_range_hist) >= YOUNG_TRACK_MIN_SAMPLES:
+    a = np.array(track.young_range_hist, dtype=np.float64)
+    ts = a[:, 0] - a[-1, 0]
+    if ts[-1] - ts[0] >= YOUNG_TRACK_MIN_SPAN_S:
+      k, b = np.polyfit(ts, a[:, 1], 1)
+      if float(np.sqrt(((a[:, 1] - (b + k * ts)) ** 2).mean())) <= YOUNG_TRACK_MAX_RESIDUAL_M:
+        slope = float(k)
+  if slope is None or slope * v_rel <= 0.0 or abs(slope) <= abs(v_rel):
+    return None
+  return slope
 
 
 def far_rail_model_sample(vis) -> tuple[float, float, float] | None:
@@ -1644,7 +1690,12 @@ def track_matches_vision(track: Track, lead: capnp._DynamicStructReader, v_ego: 
   # closure that radar tracked correctly. Deleting radar leads is the 000001f9 failure mode, so this
   # is left as-is deliberately: inert, but inert in the safe direction. Do not "fix" it without
   # first establishing which sensor is right on the frames it would start rejecting.
-  vel_sane = (abs(track.vRel + v_ego - lead.v[0]) < vel_limit) or (v_ego + track.vRel > 3)
+  v_rel = track.vRel
+  if honda_bosch_a:
+    rail_slope = rail_range_vrel(track)
+    if rail_slope is not None:
+      v_rel = rail_slope  # RAIL_RANGE_VEL_CHECK: the rail is a clamp; the clean range slope is the speed
+  vel_sane = (abs(v_rel + v_ego - lead.v[0]) < vel_limit) or (v_ego + v_rel > 3)
   if honda_bosch_a and NEWBORN_LEAD_NEEDS_CLOSING and track.cnt == 0 and not track.measured and \
      not young_range_genuinely_closing(track, v_ego):
     return False  # NEWBORN_LEAD_NEEDS_CLOSING: a never-measured newborn is no lead until its range proves closing
@@ -1686,7 +1737,8 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, model_
   # strict vision gate by a small margin, keep the previous radar match instead of
   # oscillating between radar and vision estimates.
   preferred_track = tracks.get(preferred_track_id)
-  if preferred_track is not None and preferred_track.cnt >= 3:
+  if preferred_track is not None and preferred_track.cnt >= 3 and \
+     not (honda_bosch_a and rail_range_vrel(preferred_track) is not None):  # RAIL_RANGE_VEL_CHECK: no loose hold on a clamp
     if track_matches_vision(preferred_track, lead, v_ego,
                             dist_scale=0.40, dist_floor=8.0,
                             vel_limit=13.0, y_std_scale=2.0, y_floor=1.5, honda_bosch_a=honda_bosch_a):

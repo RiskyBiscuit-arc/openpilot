@@ -482,6 +482,26 @@ LEAD_COAST_MIN = -0.5  # m/s^2, deepest coast (uphill); a real brake is the plan
 LEAD_COAST_FALL_JERK = 0.75  # m/s^3, gas fading out (+0.6 -> 0 in 0.8 s, stock's p50 fade)
 LEAD_COAST_RISE_JERK = 1.0  # m/s^3, gas coming back (-0.3 -> +0.7 in 1 s)
 LEAD_COAST_BRAKE_JERK = 1.0  # m/s^3, brake build-up from a coast while barely closing (stock p90 0.95)
+# LEAD_COAST_GAS_OFF (D-091): the coast ceiling above is an accel (about -0.33 on the flat), and on the Civic Bosch the
+# carcontroller turns any road-load-adjusted force under BOSCH_BRAKE_FORCE_ON (-0.12) into a brake request with brake
+# lights; only [-0.12, 0] is gas-off-no-brake. So the "coast" was a light brake. Route 000002f8 (owner: "gas stop gas,
+# not sure if this coasting fix is working"): 36 gas<->brake flips and brake taps at -0.30..-0.40, 1 true coast frame in
+# the bookmarked 1590-1611 s event; closed-loop planner replay of the whole route, 49 throttle/brake flips with
+# StockBrakeFeel on against 9 off, the extra flips at the coast ceiling (e.g. 21:00-21:09, 0.7-1.0 m/s closing, ~-0.33
+# for ~2 s). While a below-zero coast ceiling is why the target is negative (the planner's own target is at or above it,
+# so not a deeper planner brake), longitudinalPlan.leadCoast asks the car to coast instead. That includes the release:
+# a first version tied the flag to the COAST level and the published target, and the replay showed 0.2-0.5 s brake taps
+# each time the coast ended (target still easing up from -0.4 under the brake-release limits) or the ceiling rose with
+# speed ahead of the target; the Honda Bosch carcontroller then sends gas off with no brake request as long as accel
+# stays above BOSCH_LEAD_COAST_MIN_ACCEL. Stock's own coast frames carry ACCEL_COMMAND p50 -0.39 with no brake request,
+# so the commanded level is the stock one. Caveat (Job/Jason 2026-10-07, above): while following with its set speed out
+# of the way stock eases off with a light brake request more often than it coasts. Static + replay only.
+LEAD_COAST_GAS_OFF = True
+LEAD_COAST_GAS_OFF_MARGIN = 0.05  # m/s^2; the planner's target counts as at the ceiling within this
+# Exit hysteresis: once coasting, stay coasting until the planner wants this much more than the ceiling. With the enter
+# margin on both sides the flag flickered as the planner hovered at the ceiling (2f8 replay, Civic mode emulation: 67
+# flag runs < 0.5 s, 30 light brake taps); 0.10 -> 13 taps, 0.20 -> 11, so the smallest step that removes the flicker.
+LEAD_COAST_GAS_OFF_EXIT_MARGIN = 0.10
 # Newborn lead aLeadK bound (D-080, proposed; replay only, not driven), now part of the StockBrakeFeel toggle (D-086). STATUS 212:
 # on 2e2 (bookmark ~283 s) a radar lead first seen while its velocity estimate was still converging published aLeadK
 # -3 / -2.5 when ~0.75 m/s^2 was needed, and on 2e1 a jumping track reached -13.7; the planner braked early and twice,
@@ -676,6 +696,17 @@ def lead_coast_ceiling(ceiling: float | None, prev: float, level: int, coast: fl
   # Rise from the last output, not from a ceiling that kept climbing above it, so the gas never jumps back.
   ceiling = min(ceiling, max(prev, coast)) + LEAD_COAST_RISE_JERK * dt
   return None if ceiling >= ACCEL_MAX else float(ceiling)
+
+
+def lead_coast_gas_off(ceiling: float | None, planner_target: float, a_target: float, emergency: bool,
+                       active: bool = False) -> bool:
+  """LEAD_COAST_GAS_OFF: True while a below-zero lead coast ceiling, not the planner, is why the published target is
+  negative: the planner's own target (before the ceiling) is at or above the ceiling. Covers the coast and its release
+  (ceiling rising back, target lagging under the brake-release limits); a hold ceiling (0) is never a coast. active: the
+  flag was on last cycle (exit hysteresis)."""
+  margin = LEAD_COAST_GAS_OFF_EXIT_MARGIN if active else LEAD_COAST_GAS_OFF_MARGIN
+  return bool(LEAD_COAST_GAS_OFF and ceiling is not None and ceiling < 0.0 and not emergency and a_target <= 0.0 and
+              planner_target >= ceiling - margin)
 
 
 def brake_onset_limited_target(prev: float, target: float, dt: float, jerk: float | None) -> float:
@@ -1631,6 +1662,8 @@ class LongitudinalPlanner:
     self.lead_coast_active = LEAD_COAST_OFF
     self.lead_coast_ceiling = None
     self.stock_feel_emergency = False
+    self.lead_coast_planner_target = 0.0
+    self.lead_coast_request = False
     self.fast_closing_lead_track = None
     self.fast_closing_tick = 0
     self.fast_closing_vision_seen = {}
@@ -4363,6 +4396,7 @@ class LongitudinalPlanner:
                                                  self.lead_coast_active)
       self.lead_coast_ceiling = lead_coast_ceiling(self.lead_coast_ceiling, prev_output_a_target, self.lead_coast_active,
                                                    accel_coast, self.dt)
+      self.lead_coast_planner_target = output_a_target
       if self.lead_coast_ceiling is not None:
         output_a_target = min(output_a_target, self.lead_coast_ceiling)
         leads = (self.lead_one, self.lead_two)
@@ -4421,6 +4455,9 @@ class LongitudinalPlanner:
 
     longitudinalPlan.aTarget = float(self.output_a_target)
     longitudinalPlan.accelBoost = float(self.accel_boost.total_boost)
+    self.lead_coast_request = lead_coast_gas_off(self.lead_coast_ceiling, self.lead_coast_planner_target,
+                                                 self.output_a_target, self.stock_feel_emergency, self.lead_coast_request)
+    longitudinalPlan.leadCoast = self.lead_coast_request
     force_stop_handoff = bool(
       sm['starpilotPlan'].forcingStop and (
         sm['starpilotPlan'].forcingStopLength < 1.0 or

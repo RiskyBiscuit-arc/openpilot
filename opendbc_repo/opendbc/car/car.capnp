@@ -392,6 +392,8 @@ struct CarControl {
     torqueOutputCan @8: Float32;   # value sent over can to the car
     speed @6: Float32;  # m/s
     lateralControlMode @9: LateralControlMode;
+    # planner lead coast: a car that can coast (gas off, no brake request) does so while accel is a light decel
+    coast @10: Bool;
 
     enum LongControlState @0xe40f3a917d908282{
       off @0;

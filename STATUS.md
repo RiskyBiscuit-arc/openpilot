@@ -10753,3 +10753,58 @@ recovered U11 is wrong by 7-8 m/s in both directions, and 2a6's under-closing ki
     still crosses -1.0 0.6 s later (same depth). The slope check is a guard against a wrong U11 that the camera's noisy speed happens
     to agree with; it changed no brake on these routes. Not driven. Watch on the next drive: far leads (60-100 m) staying radar,
     and any slowdown that starts later than expected with a far lead.
+
+## 226. Route 000002f8: the "gas stop gas" was Stock Brake Feel's coast going out as a brake tap; the 1:38 slowdown was a railed radar object passing the camera pairing. Two fixes shipped, IQ-stop-C only. D-090, D-091 (2026-10-08). Owner: "I bookmarked two instances. One is a weird slowdown ... And second was like a gas stop gas. Not sure if this coasting fix is working" and "Yeah let's try both". Static + replay only; not driven.
+
+**What the route showed (log decode + closed-loop planner replay with SBF forced off/on).**
+- SBF on vs off (replay, whole route): throttle/brake flips 49 vs 9, time at -0.25 or more 351 vs 250 s, time under -1.0 75 vs 81 s,
+  RMS jerk 0.53 vs 0.64, deepest -3.50 both. The real brakes are softer with SBF, but its coast adds many small taps.
+- Why: SBF's coast caps the target near -0.33 for ~2 s while the lead closes by 0.5-1 m/s. The Civic Bosch carcontroller requests the
+  brake (with lights) once the road-load-adjusted force drops below -0.12, so the coast was a light brake. Logged car: 928 s gas, 460 s
+  brake, 66 s true coast; its brake taps (8:38, 9:45, 10:30, 11:12, 11:21, 14:21, 14:32, 20:40-21:07, 26:37) line up with the replay's.
+- Bookmark 2 (26:55): radar lost the lead at 26:36 and the camera showed it pulling away (gas +0.55); then a coast-turned-brake tap at
+  26:45; then a real brake to -1.7 when radar found the car again at 38 m closing at 4.6 m/s.
+- Bookmark 1 (1:38): not experimental mode, not a red light. Radar track 52 on the curve had U11 vRel on the -12 rail while its range
+  slope read -19.6 m/s; it passed the strict vision-match velocity gate by 0.14 m/s (9.86 < 10) and the loose preferred hold kept it.
+  The car braked at -2.3 from 30 to 17 mph. The camera's lead was a different car ~70 m ahead, which later did slow (12 -> 5 m/s,
+  probably turning off).
+
+**Fix 2, radar-camera pairing (D-090), `RAIL_RANGE_VEL_CHECK` in radard, default on.** For a railed vRel (within 0.05 of ±12) the
+vision match uses the track's own range slope when that slope is clean, the same sign and beyond the rail; such a track also loses the
+loose preferred hold. Nothing deleted or rewritten in the published point.
+- *Tried first, did not work:* the slope check on the strict gate alone; the track came back through the loose hold (12.98 < 13).
+- Open-loop scan, 7 routes (2f8, 2f5, 2f2, 2a4, 2a6, 268, 26b): changed episodes 2/2/3/0/0/1/2, each moving the lead toward the camera
+  speed (2f8 BM1 vLead 1.4 -> 11.9; 268 702.5 s radar 89 m vs camera 78.7 m; 26b nonsense vLead -9.5/-5.0 removed, disengaged). No
+  real slow lead lost.
+- Closed-loop replay, BM1: shipped -0.49/-1.13/-1.86 at 90.5/91.0/91.5 s then ~-2.05, min 7.2 m/s; fixed holds -1.00 over 91.0-91.5,
+  -1.24 at 92.0, then -2.1/-2.3 at 92.5-93.0 following the camera lead's real slowdown, min 7.5 m/s. **Partial**: it softens and delays
+  the first second; the rest of that slowdown follows a really slowing car.
+
+**Fix 1, true coast on Honda Bosch (D-091), `LEAD_COAST_GAS_OFF`, default on.** New `longitudinalPlan.leadCoast` -> controlsd
+`actuators.coast` (pid state only) -> Honda Bosch carcontroller sends gas off with no brake request while accel is in [-0.6, 0] and not
+stopping (`BOSCH_LEAD_COAST_MIN_ACCEL`). Measured on the whole 2f8 replay (RRV and SBF on) with an emulation of the Civic's
+gas/brake/coast selection (planner target as accel, no LongControl, windfactor 1, no hill; noisier than the car, which logged 36 flips):
+
+| version | gas s | brake s | coast s | gas<->brake flips | brake episodes | light taps (< 3 s, > -0.6) |
+|---|---|---|---|---|---|---|
+| SBF off (reference) | 994 | 412 | 56 | 56 | 50 | 10 |
+| SBF on, no coast fix | 900 | 528 | 34 | 122 | 81 | 31 |
+| v1: flag = COAST level and published target at the ceiling | 894 | 402 | 166 | 82 | 95 | 55 |
+| v2: flag = planner's own target at/above a below-zero ceiling | 886 | 375 | 201 | 43 | 69 | 30 |
+| **v3 shipped: v2 + exit hysteresis 0.10** | 883 | 364 | 215 | 43 | 52 | 13 |
+
+- *v1 did not work:* each coast ended with a 0.2-0.5 s brake tap (target still easing up from -0.4 under the brake-release limits after
+  the level dropped, or lagging a ceiling that rose with speed). More taps than without the fix.
+- *v2 fixed the exits but flickered:* 67 flag runs under 0.5 s as the planner hovered at the ceiling.
+- *v3:* the coast holds until the planner wants more than 0.10 m/s^2 beyond the ceiling (exit 0.20 gave 11 taps, 0.30 10; 0.10 is the
+  smallest step). Bookmark 2: the 26:45 tap becomes a coast, the real brake after it is kept.
+- The flag never changes the planner's targets; any brake deeper than the coast still goes out as a brake.
+- Caveat: stock eases off with a light brake request more often than it coasts while following (Job/Jason 2026-10-07), though its own
+  coast frames carry ACCEL_COMMAND p50 -0.39. If the next drive opens gaps too fast in light closing, tune the margins or the -0.6 floor.
+
+**Tests (static).** `test_radard_rail_range_vel.py` (4), `test_brake_onset.py` (+4 coast-flag cases, wiring), `test_honda.py` (gas off
+with no BRAKE_REQUEST/lights; the coast never replaces a real brake). controls + Honda tests: 2328 passed; the only error is
+`test_leads::test_radar_fault` needing /data/params on this VM (the 2 known latcontrol failures deselected). Ruff: no new findings.
+
+**Watch on the next drive:** fewer brake-light taps while following on the highway; the car should coast instead. Any gap that
+opens too much in light closing, and any slowdown that starts later than expected near a lead on a curve.
