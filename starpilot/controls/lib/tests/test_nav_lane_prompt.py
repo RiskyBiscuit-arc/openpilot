@@ -38,3 +38,7 @@ def test_not_armed_in_edge_lane_slow_or_invalid():
   assert not prompt({})["armed"]
   assert not prompt(nav(mod="straight"))["armed"]
   assert not prompt(nav("fork", "slight right"))["armed"]
+
+
+def test_too_close_to_finish_a_lane_change_clears():
+  assert not prompt(nav(dist=40.0), v=13.0)["armed"]

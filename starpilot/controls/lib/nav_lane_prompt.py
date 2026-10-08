@@ -7,6 +7,7 @@ TURN_PROMPT_SECONDS = 10.0
 TURN_PROMPT_MIN_M, TURN_PROMPT_MAX_M = 60.0, 200.0
 
 LEFT_MODIFIERS = ("left", "sharpleft", "slightleft")
+MIN_LEAD_SECONDS = 4.0  # too close to finish a lane change: stop prompting
 RIGHT_MODIFIERS = ("right", "sharpright", "slightright")
 
 
@@ -47,7 +48,7 @@ def nav_lane_move_prompt(nav_state: dict, v_ego: float, min_speed: float, adjace
 
   window = prompt_window_m(kind, v_ego)
   out.update(side=side, kind=kind, distance_m=distance, window_m=window)
-  if not 0.0 < distance <= window or v_ego < min_speed:
+  if not v_ego * MIN_LEAD_SECONDS < distance <= window or v_ego < min_speed:
     return out
 
   # No adjacent lane on that side (width below the detection threshold): already in the edge lane
