@@ -2016,7 +2016,7 @@ As a result, the commits were properly cherry-picked. The conflicts in `starpilo
 2. Safely removed the invalid `vision_lead=birth_vision` argument from `radard.py` to restore functionality.
 **Agent:** Gemini 3.8 Flash
 
-## D-089 — Far-range re-anchor lockout: relaxing the D-057 sigma test alone is rejected; camera-checked recovery is a candidate; one-way handoff smoothing rejected as built (STATUS 225, 2026-10-08, replay only, not shipped)
+## D-089 — Far-range re-anchor lockout: relaxing the D-057 sigma test alone is rejected; camera-checked recovery shipped (IQ-stop-C); one-way handoff smoothing rejected as built (STATUS 225, 2026-10-08, replay only, not driven)
 
 - **Finding.** `RANGE_SIGMA_RAW` grows with range (~0.08 x dRel), so every sweep beyond ~60 m counts as degraded and D-057 can never
   re-anchor a far lead after one range step. The lead is then camera-only until it comes close: 22 % (103 s) of camera-only lead time on 7
@@ -2027,8 +2027,10 @@ As a result, the commits were properly cherry-picked. The conflicts in `starpilo
 - **Candidate: camera-checked recovery.** The same relaxation, but the interface flags the point `recovered` and radard uses it only after
   3 frames where a confident camera lead agrees on range, lateral and speed (dropped after 10 disagreeing frames). Closed-loop replay, 6
   routes: +34 s radar lead on 2f5, no extra brake anywhere, one shipped dip removed; one genuine slowdown (2f5 16:44.5) crosses -1.0 0.6 s
-  later because it follows the radar's -3.4 m/s instead of the camera's inflated closing. Not shipped; owner to choose. A range-slope check
-  on the recovered track is the next guard if it goes further.
+  later because it follows the radar's -3.4 m/s instead of the camera's inflated closing. **Shipped default on, IQ-stop-C only** (owner,
+  2026-10-08), with a range-slope check: the point's own long-window range slope must also agree with its vRel (3 m/s, the D-043 rate
+  tolerance). Replay of the shipped build: same brakes, 2f5 +31 s radar lead. Not driven. Do not loosen the camera or slope check without
+  a closed-loop replay; the relaxation alone was measured to recover wrong U11.
 - **Rejected: one-way handoff smoothing** (ease steps toward more braking over 0.5 s at a lead source change, bypass on TTC < 4 s or an
   agreeing range/camera speed). On 6 routes it removed no meaningful extra brake and softened one genuine episode (268 10:21.7, -1.39 ->
   -1.19) by easing a radar -> camera step. Extra brakes in these routes are not at handoffs. Do not retry it without a case where a

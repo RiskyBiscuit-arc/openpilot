@@ -336,6 +336,11 @@ struct RadarData @0x888ad6581cf0aacb {
     # -1 (the default) means "not provided": every other radar, and every log recorded before this field existed.
     # radard gates only NEW onpath adoption on its window median (ONPATH_ADOPT_MIN_MEDIAN_EXISTENCE).
     existence @10 :Float32 = -1.0;
+
+    # Honda Bosch-A only (D-089): the point's range anchor came from a far-range D-057 re-anchor that only the
+    # range-scaled sigma window allowed (BOSCH_A_REANCHOR_RECOVER_SIGMA_FRAC). radard uses it only while the camera
+    # and the point's own range slope agree. False (the default) on every other radar and in older logs.
+    recovered @11 :Bool;
   }
 
   enum ErrorDEPRECATED {
