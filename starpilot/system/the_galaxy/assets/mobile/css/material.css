@@ -1744,26 +1744,28 @@ button.gx-chip:hover {
     padding-bottom: calc(var(--bottomnav-clearance) + 56px);
   }
 
-  .gx-navigation-summary { margin-top: var(--sp-2); padding: var(--sp-1) var(--sp-2); }
-  .gx-navigation-metrics { gap: var(--sp-1); padding: var(--sp-1) 0; }
+  .gx-navigation-summary { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+  .gx-navigation-summary__title { padding: 0; }
+  .gx-navigation-metrics { gap: 6px; padding: 6px 0; }
   .gx-navigation-metric {
     gap: 6px;
     grid-auto-flow: column;
     justify-content: center;
-    padding: 4px var(--sp-1);
+    padding: 6px var(--sp-1);
   }
   .gx-navigation-metric span { display: none; }
-  .gx-navigation-route-picker { padding: 0 0 var(--sp-1); }
-  .gx-navigation-route-option { min-height: 30px; padding: 0 var(--sp-2); }
+  .gx-navigation-route-picker { gap: 6px; padding: 2px 0 6px; }
+  .gx-navigation-route-option { min-height: 32px; padding: 0 var(--sp-3); }
   .gx-navigation-preferences {
     flex-wrap: nowrap;
-    margin-bottom: var(--sp-1);
+    gap: 6px;
+    margin-bottom: var(--sp-2);
     overflow-x: auto;
     scrollbar-width: none;
   }
   .gx-navigation-preferences::-webkit-scrollbar { display: none; }
-  .gx-navigation-pref-pill { flex: 0 0 auto; min-height: 28px; padding: 0 var(--sp-2); white-space: nowrap; }
-  .gx-navigation-summary__actions .gx-btn { min-height: 40px; }
+  .gx-navigation-pref-pill { flex: 0 0 auto; min-height: 30px; padding: 0 var(--sp-3); white-space: nowrap; }
+  .gx-navigation-summary__actions .gx-btn { min-height: 44px; }
 
   .gx-navigation-tabs {
     bottom: var(--bottomnav-clearance);
