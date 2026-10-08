@@ -10817,3 +10817,14 @@ out as a true coast (GAS_COMMAND -30000, no BRAKE_REQUEST), 0 as a brake. Coasts
 taps (< 3 s, shallower than -0.6) at all; 2f8 had 1.65 per engaged minute by the same count. A railed radar lead appeared on 2
 frames (2:25.3, far approach to the first stop); nothing to judge D-090 on. Too short to call either fix settled; the highway following
 of 2f8 was not repeated.
+
+**Second drive: 00000300--ef201af8fa (commit bd48223c9 = the D-090/D-091 build plus UI/uploader commits, 2026-10-08), limited road
+evidence.** 20.5 min under openpilot long. Same sendcan count as above, against 2f8: gas<->brake flips 5.04 -> 2.10 per engaged minute,
+brake episodes 3.76 -> 2.34/min, light taps 1.65 -> 0.59/min, true coast 4.5 % -> 10.6 % of engaged time. The coast flag was on for
+5118 frames: 5087 sent as a coast, 17 as a brake (accel below the -0.6 floor), 14 as gas. Mixed driving, so the per-minute rates are
+indicative only. The 12 light taps left:
+- 7 come from the planner's own -0.2..-0.35 easing with no SBF coast: a far lead at 48-104 m closing 1-2 m/s with the cruise source
+  setting the target (8:30, 8:31, 11:18, 23:58), and no lead at all (6:34, 24:07, 24:13). The D-091 flag does not cover these.
+- 3 follow a coast where the planner then wanted ~-0.5, past the exit hysteresis (13:08, 13:33, 18:07): working as designed.
+- 2 others (9:02 following at 28 m, -0.45; 18:10, a 1 s brake request at ~0 accel).
+Railed radar lead: 24 frames; no slowdown from one found in the light-tap list.
