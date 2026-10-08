@@ -1744,6 +1744,10 @@ button.gx-chip:hover {
     padding-bottom: calc(var(--bottomnav-clearance) + 56px);
   }
 
+  .gx-navigation-search { padding: 2px var(--sp-1); }
+  .gx-navigation-search .gx-field { font-size: var(--fs-sm); min-height: 38px; }
+  .gx-navigation-search__row > i { font-size: 1rem; padding-left: var(--sp-2); }
+  .gx-navigation-send { min-height: 36px; min-width: 36px; }
   .gx-navigation-summary { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3) var(--sp-3); }
   .gx-navigation-summary__title { padding: 0; }
   .gx-navigation-metrics { gap: 6px; padding: 6px 0; }
@@ -2534,7 +2538,9 @@ button.gx-chip:hover {
   .blur-nav { display: flex; }
   .gx-drawer { padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px)); }
   .gx-back-btn { display: inline-flex; }
-  .gx-appbar__search { flex: 1; min-width: 0; }
+  .gx-appbar__search { flex: 1; font-size: var(--fs-xs); height: 32px; min-width: 0; padding: 0 var(--sp-3); }
+  .gx-appbar__pill { gap: var(--sp-1); padding: 4px var(--sp-2); }
+  .gx-appbar__title { font-size: var(--fs-base); }
   .gx-status-pill { display: none; }
   .gx-content { padding-left: var(--sp-3); padding-right: var(--sp-3); }
 }
