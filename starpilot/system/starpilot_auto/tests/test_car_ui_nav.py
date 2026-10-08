@@ -758,7 +758,7 @@ def test_screen_route_and_favorite_chips(nav_screen):
   page._draft_destination = {"name": "Gym", "latitude": 37.6, "longitude": -122.2}
   page._preview_routes = [SimpleNamespace(total_duration=600), SimpleNamespace(total_duration=900)]
   page._preview_route_index = 1
-  assert nav_screen.route_chips() == [("route:0", "Fastest · 10 min", False), ("route:1", "Route 2 · 15 min", True)]
+  assert nav_screen.route_chips() == [("route:0", "Fastest 10 min", False), ("route:1", "2 · 15 min", True)]
   assert [chip[1:] for chip in nav_screen.favorite_chips()] == [("Save", False), ("Home", False), ("Work", False)]
   page._favorites = [{"id": "g", "name": "Gym", "latitude": 37.6, "longitude": -122.2, "is_home": True}]
   assert [chip[1:] for chip in nav_screen.favorite_chips()] == [("Saved", True), ("Home", True), ("Work", False)]

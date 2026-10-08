@@ -1053,7 +1053,7 @@ class NavMapView(Widget):
         points = np.concatenate(pieces)
         min_x, min_y = points.min(axis=0)
         max_x, max_y = points.max(axis=0)
-        pad = 90.0
+        pad = 56.0
         span_x, span_y = max(max_x - min_x, 1e-7), max(max_y - min_y, 1e-7)
         fit = min((rect.width - 2 * pad) / (span_x * tile_scale), (rect.height - 2 * pad) / (span_y * tile_scale))
         zoom = max(3.0, min(PREVIEW_MAX_ZOOM, math.log2(max(fit, 1e-9))))
