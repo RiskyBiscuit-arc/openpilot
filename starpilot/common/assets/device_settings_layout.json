@@ -2494,6 +2494,7 @@
         "min": 0.0,
         "max": 3.0,
         "step": 0.01,
+        "parent_key": "LowVisibilityOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2504,6 +2505,7 @@
         "ui_type": "numeric",
         "min": 0.0,
         "max": 10.0,
+        "parent_key": "LowVisibilityOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2515,6 +2517,7 @@
         "min": 0.0,
         "max": 99.0,
         "step": 1.0,
+        "parent_key": "LowVisibilityOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2526,6 +2529,7 @@
         "min": 0.0,
         "max": 99.0,
         "step": 1.0,
+        "parent_key": "LowVisibilityOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2546,6 +2550,7 @@
         "min": 0.0,
         "max": 3.0,
         "step": 0.01,
+        "parent_key": "RainOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2556,6 +2561,7 @@
         "ui_type": "numeric",
         "min": 0.0,
         "max": 10.0,
+        "parent_key": "RainOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2567,6 +2573,7 @@
         "min": 0.0,
         "max": 99.0,
         "step": 1.0,
+        "parent_key": "RainOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2578,6 +2585,7 @@
         "min": 0.0,
         "max": 99.0,
         "step": 1.0,
+        "parent_key": "RainOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2598,6 +2606,7 @@
         "min": 0.0,
         "max": 3.0,
         "step": 0.01,
+        "parent_key": "RainStormOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2608,6 +2617,7 @@
         "ui_type": "numeric",
         "min": 0.0,
         "max": 10.0,
+        "parent_key": "RainStormOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2619,6 +2629,7 @@
         "min": 0.0,
         "max": 99.0,
         "step": 1.0,
+        "parent_key": "RainStormOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2630,6 +2641,7 @@
         "min": 0.0,
         "max": 99.0,
         "step": 1.0,
+        "parent_key": "RainStormOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2650,6 +2662,7 @@
         "min": 0.0,
         "max": 3.0,
         "step": 0.01,
+        "parent_key": "SnowOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2660,6 +2673,7 @@
         "ui_type": "numeric",
         "min": 0.0,
         "max": 10.0,
+        "parent_key": "SnowOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2671,6 +2685,7 @@
         "min": 0.0,
         "max": 99.0,
         "step": 1.0,
+        "parent_key": "SnowOffsets",
         "settings_tier": "simple"
       },
       {
@@ -2682,6 +2697,7 @@
         "min": 0.0,
         "max": 99.0,
         "step": 1.0,
+        "parent_key": "SnowOffsets",
         "settings_tier": "simple"
       },
       {
