@@ -2073,3 +2073,29 @@ As a result, the commits were properly cherry-picked. The conflicts in `starpilo
 - **Caveat.** Stock's coast frames carry ACCEL_COMMAND p50 -0.39 with no brake request, so the level matches stock; but while following
   with its set speed out of the way, stock eases off with a light brake request more often than it coasts (Job/Jason, 2026-10-07).
   If the next drive shows gaps opening too fast in light closing, the margin or the -0.6 floor is the lever, not removing the coast.
+
+## D-092 — Gentle planner easing (far lead, no lead, set speed, curve) also coasts gas-off on Honda Bosch (STATUS 227, 2026-10-08, open-loop replay only, not driven)
+
+- **Finding (route 00000300, D-091 on).** 7 of the 12 light brake taps left were the planner itself easing at -0.17..-0.35 with
+  no lead coast: no lead (6:34), a far lead at 49-104 m closing 1-2 m/s (8:30, 8:31, 11:18, 23:58), curve speed control
+  (24:07, 24:13). The carcontroller sends those as a brake request once the road-load-adjusted force is under -0.12. Logged coast
+  frames on the same route show the Civic coasts at -0.21..-0.29 (pitch-corrected) at 5-23 m/s, close to `get_coast_accel`.
+- **Shipped default on, IQ-stop-C only, inside the StockBrakeFeel toggle:** `EASE_COAST_GAS_OFF`. `longitudinalPlan.leadCoast`
+  is also set while the published target is at or below -0.10 and no deeper than the coast estimate minus 0.05 (exit: above
+  -0.05 or 0.10 below the estimate). Same path to the car as D-091 (pid state only; gas off, no brake request, accel in
+  [-0.6, 0]). Not while stopping, at standstill, under 5 m/s, on FCW or a stock-feel emergency, on a forced stop or a red light.
+  - It may only **start from above** (target was above -0.10): never inside a brake that is already on; it re-arms once the
+    target is back above -0.10.
+  - It needs a coast estimate of -0.25 or deeper (flat or uphill; downhill under ~0.9 %).
+- **Tried, did not work (route 300 open-loop on logged targets):**
+  - The window alone: flips 43 -> 28 but light taps 12 -> 21. Brakes hovering around -0.35..-0.48 were cut into coast/brake
+    pieces. The start-from-above rule fixed it: 9 taps.
+  - Of those 9, all 5 new taps were on a 1.2-2.3 % downhill: the hill term already brakes there at a target near 0, so a coast
+    started at -0.10 cut that brake in two. The -0.25 grade gate removed them.
+- **Result (open loop, route 300):** light taps 12 -> 4, flips 43 -> 29, brake episodes 48 -> 40, coast 10.6 -> 15.0 %. The 4
+  left are the same as before (two -0.45..-0.50 brakes, two at the D-091 coast exit).
+  - The grade gate was chosen on the route it was scored on.
+  - The flag does not feed the planner, so the car's slightly different decel while coasting is not modelled. If it
+    under-delivers, the planner target deepens out of the window and the brake comes back.
+- **Lever if the next drive closes on slow far leads too late or runs wide in curves:** the -0.10 upper bound and the coast
+  margin, not removing the coast.

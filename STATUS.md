@@ -10828,3 +10828,38 @@ indicative only. The 12 light taps left:
 - 3 follow a coast where the planner then wanted ~-0.5, past the exit hysteresis (13:08, 13:33, 18:07): working as designed.
 - 2 others (9:02 following at 28 m, -0.45; 18:10, a 1 s brake request at ~0 accel).
 Railed radar lead: 24 frames; no slowdown from one found in the light-tap list.
+
+## 227. Gentle slowdowns with a far car, no car, or a curve ahead now coast instead of tapping the brake. D-092 (2026-10-08). Owner: "Yeah go ahead and build it". Static + open-loop replay only; not driven.
+
+**What it fixes.** On 00000300 most of the light brake taps left after D-091 were the planner easing at -0.17..-0.35 on its own: a far
+lead at 49-104 m closing slowly, no lead, or curve speed control. Those went out as short brake requests with brake lights. The Civic
+coasts at about -0.21..-0.29 on the flat (logged coast frames on the same route, pitch-corrected), so those targets can be met with the gas off.
+
+**What shipped (IQ-stop-C, default on, part of the StockBrakeFeel toggle):** `EASE_COAST_GAS_OFF` in `longitudinal_planner.py`
+sets `longitudinalPlan.leadCoast` while the published target is in [coast estimate - 0.05, -0.10]. It exits at -0.05 or 0.10 below the
+estimate. It only starts when the target comes down from above -0.10, never in the middle of a brake. It needs a coast estimate of
+-0.25 or deeper (no downhill coasts). It is off when stopping, at standstill, under 5 m/s, on FCW, on a stock-feel emergency, on a
+forced stop or at a red light. The car side is unchanged from D-091: gas off, no brake request, only while accel is in [-0.6, 0].
+
+**Evidence.** Open-loop replay on 00000300's logged targets and sendcan modes (the flag does not feed the planner; the car's own
+decel while coasting is not modelled):
+
+| | logged (D-091) | with D-092 |
+|---|---|---|
+| light brake taps | 12 | 4 |
+| gas<->brake flips | 43 | 29 |
+| brake episodes | 48 | 40 |
+| true coast | 10.6 % | 15.0 % |
+
+All 8 taps it removed were the far-lead/no-lead/curve easing plus 18:07. The 4 left were already in the logged list.
+
+**Tried, did not work:**
+- Window only: 21 taps, because brakes hovering near the coast level were cut into pieces.
+- Plus the start-from-above rule: 9 taps; the 5 new ones were all on 1.2-2.3 % downhills.
+- The grade gate was picked on this same route.
+
+Tests: controls + Honda 2504 passed (5 new in `test_brake_onset.py`); the 2 failures are the known latcontrol ones (Bolt, Palisade). Ruff: no new findings.
+
+**Watch on the next drive:**
+- Fewer brake-light blips when easing to the set speed, behind a far car, or into a curve.
+- Any time it feels like it waits too long to slow for a slow far car, or runs a little fast into a curve.

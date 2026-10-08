@@ -339,6 +339,62 @@ def test_lead_coast_gas_off_exit_hysteresis():
 def test_lead_coast_flag_is_published_and_reaches_the_actuators():
   from pathlib import Path
   src = Path(lp.__file__).read_text()
-  assert 'longitudinalPlan.leadCoast = self.lead_coast_request' in src
+  assert 'longitudinalPlan.leadCoast = self.lead_coast_request or self.ease_coast_request' in src
   ctl = (Path(lp.__file__).parents[2] / 'controls' / 'controlsd.py').read_text()
   assert 'actuators.coast = bool(CC.longActive and long_plan.leadCoast' in ctl
+
+
+
+def ease(coast, a, blocked=False, active=False, armed=True):
+  return lp.ease_coast_gas_off(coast, a, blocked, active, armed)[0]
+
+
+def test_ease_coast_covers_gentle_planner_easing_within_the_coast():
+  # route 300: far-lead / no-lead / CSC easing at -0.17..-0.35 went out as light brake taps
+  coast = -0.30
+  for a in (-0.12, -0.23, -0.30, -0.35):
+    assert ease(coast, a)
+  assert not ease(coast, -0.40)                                      # deeper than the car coasts: a brake
+  assert not ease(coast, -0.05)                                      # near-zero: cruising, light gas stays
+  assert not ease(coast, 0.3)
+
+
+def test_ease_coast_never_on_downhill_unknown_pitch_or_when_blocked():
+  assert not ease(0.02, -0.2)                                        # downhill: coasting would not slow the car
+  assert not ease(-0.20, -0.15)                                      # ~1.8 % downhill: the car brakes near 0 there
+  assert ease(-0.28, -0.15)
+  assert not ease(None, -0.2)
+  assert not ease(-0.30, -0.2, blocked=True)                         # stopping, slow, FCW, emergency, toggle off
+  # steep uphill: the coast level is clipped to LEAD_COAST_MIN, deeper targets stay brakes
+  assert ease(-0.9, lp.LEAD_COAST_MIN)
+  assert not ease(-0.9, lp.LEAD_COAST_MIN - 0.1)
+
+
+def test_ease_coast_hysteresis_on_both_edges():
+  coast = -0.30
+  assert not ease(coast, -0.38)
+  assert ease(coast, -0.38, active=True)
+  assert not ease(coast, -0.45, active=True)
+  assert not ease(coast, -0.08)
+  assert ease(coast, -0.08, active=True)
+  assert not ease(coast, -0.03, active=True)
+
+
+def test_ease_coast_starts_only_from_above_never_inside_a_brake():
+  # route 300 open-loop: re-entering while a brake hovered around the coast level split brakes into taps (12 -> 21)
+  coast, armed, active, flags = -0.30, False, False, []
+  for a in (0.1, -0.08, -0.2, -0.3, -0.5, -0.32, -0.2, -0.08, -0.03, -0.2):
+    active, armed = lp.ease_coast_gas_off(coast, a, False, active, armed)
+    flags.append(active)
+  assert flags == [False, False, True, True, False, False, False, False, False, True]
+  assert lp.ease_coast_gas_off(coast, -0.2, True, True, True) == (False, False)
+
+
+def test_ease_coast_is_blocked_by_stops_speed_fcw_and_the_toggle():
+  from pathlib import Path
+  src = Path(lp.__file__).read_text()
+  i = src.index('self.ease_coast_blocked = bool(')
+  block = src[i:src.index('\n\n', i)]
+  for gate in ('stock_brake_feel', 'reset_state', 'standstill', 'self.output_should_stop', 'self.fcw',
+               'self.stock_feel_emergency', 'EASE_COAST_MIN_SPEED', 'forcingStop', 'redLight'):
+    assert gate in block, gate

@@ -502,6 +502,26 @@ LEAD_COAST_GAS_OFF_MARGIN = 0.05  # m/s^2; the planner's target counts as at the
 # margin on both sides the flag flickered as the planner hovered at the ceiling (2f8 replay, Civic mode emulation: 67
 # flag runs < 0.5 s, 30 light brake taps); 0.10 -> 13 taps, 0.20 -> 11, so the smallest step that removes the flicker.
 LEAD_COAST_GAS_OFF_EXIT_MARGIN = 0.10
+# EASE_COAST_GAS_OFF (D-092): the same gas-off coast when nothing lead-specific is easing: a far lead (48-104 m, closing
+# 1-2 m/s), no lead, cruise/experimental easing to a set speed, curve speed control. Route 00000300 (D-091 on): of 12
+# remaining light brake taps, 7 were the planner itself easing at -0.17..-0.35 (393.7 s no lead -0.30; 510 s lead 75 m
+# -0.29; 678 s lead 49 m -0.35; 1438 s lead 104 m; 1447-1452 s CSC 30 -> 28.4 mph -0.23..-0.32), which the carcontroller
+# sends as a brake request once road-load-adjusted force is under -0.12. The Civic's measured coast on that route (logged
+# coast frames >= 0.5 s in, pitch-corrected) is -0.21..-0.29 at 5-23 m/s, close to get_coast_accel's -0.3, so a target
+# within the coast estimate (minus the D-091 margins) is one the car meets with the gas off and no brake lights. If the
+# car under-delivers, the planner's own target deepens past the window and the brake comes back. Upper bound: only
+# targets at or below EASE_COAST_MAX_ACCEL, so steady cruising (target near 0, light gas against wind) is untouched;
+# exit above EASE_COAST_EXIT_ACCEL, where the force is above the brake threshold at any speed anyway. Static + replay
+# (open-loop on route 300's logged targets) only.
+EASE_COAST_GAS_OFF = True
+EASE_COAST_MIN_SPEED = 5.0  # m/s; stop-and-go and the stop ramp stay with the planner and the stock brake law
+EASE_COAST_MAX_ACCEL = -0.10  # m/s^2; enter only at or below this
+EASE_COAST_EXIT_ACCEL = -0.05  # m/s^2; once coasting, leave above this
+# Grade gate: only where the coast estimate is at least this deep (flat or uphill; downhill under ~0.9 %). Route 300
+# open-loop: every tap the coast removed had a coast estimate of -0.28 or deeper; every tap it added (20:14, 25:01,
+# 25:02, 26:19, 26:21; 12 -> 9 taps but 5 new) was on a 1.2-2.3 % downhill (estimate -0.17..-0.23), where the
+# carcontroller's hill term already brakes at a target near 0, so a coast started at -0.10 cut that brake in two.
+EASE_COAST_MAX_LEVEL = -0.25  # m/s^2
 # Newborn lead aLeadK bound (D-080, proposed; replay only, not driven), now part of the StockBrakeFeel toggle (D-086). STATUS 212:
 # on 2e2 (bookmark ~283 s) a radar lead first seen while its velocity estimate was still converging published aLeadK
 # -3 / -2.5 when ~0.75 m/s^2 was needed, and on 2e1 a jumping track reached -13.7; the planner braked early and twice,
@@ -707,6 +727,25 @@ def lead_coast_gas_off(ceiling: float | None, planner_target: float, a_target: f
   margin = LEAD_COAST_GAS_OFF_EXIT_MARGIN if active else LEAD_COAST_GAS_OFF_MARGIN
   return bool(LEAD_COAST_GAS_OFF and ceiling is not None and ceiling < 0.0 and not emergency and a_target <= 0.0 and
               planner_target >= ceiling - margin)
+
+
+def ease_coast_gas_off(coast: float | None, a_target: float, blocked: bool, active: bool = False,
+                       armed: bool = False) -> tuple[bool, bool]:
+  """EASE_COAST_GAS_OFF: True while the published target is a gentle easing the car meets by coasting: at or below
+  EASE_COAST_MAX_ACCEL and no deeper than the coast estimate (clipped to LEAD_COAST_MIN) minus the D-091 margin. coast
+  None (no orientation yet) or above EASE_COAST_MAX_LEVEL (downhill) never coasts. blocked: stopping,
+  standstill, too slow, FCW or a stock-feel emergency. active: the flag was on last cycle (exit hysteresis). armed: the
+  coast may only start from above the window (gas or cruise easing off), never in the middle of a brake; it re-arms once
+  the target is back above EASE_COAST_MAX_ACCEL. Returns (flag, armed)."""
+  if not EASE_COAST_GAS_OFF or blocked or coast is None or coast > EASE_COAST_MAX_LEVEL:
+    return False, False
+  if a_target > EASE_COAST_MAX_ACCEL and not active:
+    return False, True
+  level = max(coast, LEAD_COAST_MIN)
+  margin = LEAD_COAST_GAS_OFF_EXIT_MARGIN if active else LEAD_COAST_GAS_OFF_MARGIN
+  upper = EASE_COAST_EXIT_ACCEL if active else EASE_COAST_MAX_ACCEL
+  on = bool((active or armed) and level - margin <= a_target <= upper)
+  return on, bool(on or a_target > upper)
 
 
 def brake_onset_limited_target(prev: float, target: float, dt: float, jerk: float | None) -> float:
@@ -1664,6 +1703,10 @@ class LongitudinalPlanner:
     self.stock_feel_emergency = False
     self.lead_coast_planner_target = 0.0
     self.lead_coast_request = False
+    self.ease_coast_level = None
+    self.ease_coast_blocked = True
+    self.ease_coast_request = False
+    self.ease_coast_armed = False
     self.fast_closing_lead_track = None
     self.fast_closing_tick = 0
     self.fast_closing_vision_seen = {}
@@ -4424,6 +4467,11 @@ class LongitudinalPlanner:
 
     self.output_a_target = output_a_target
     self.output_should_stop = bool(output_should_stop or vision_low_speed_stop_active)
+    self.ease_coast_level = accel_coast if accel_coast < ACCEL_MAX else None
+    self.ease_coast_blocked = bool(
+      not bool(getattr(starpilot_toggles, "stock_brake_feel", False)) or reset_state or bool(sm['carState'].standstill) or
+      self.output_should_stop or self.fcw or self.stock_feel_emergency or scene_v_ego < EASE_COAST_MIN_SPEED or
+      getattr(sm['starpilotPlan'], 'forcingStop', False) or getattr(sm['starpilotPlan'], 'redLight', False))
 
   def publish(self, sm, pm):
     plan_send = messaging.new_message('longitudinalPlan')
@@ -4457,7 +4505,9 @@ class LongitudinalPlanner:
     longitudinalPlan.accelBoost = float(self.accel_boost.total_boost)
     self.lead_coast_request = lead_coast_gas_off(self.lead_coast_ceiling, self.lead_coast_planner_target,
                                                  self.output_a_target, self.stock_feel_emergency, self.lead_coast_request)
-    longitudinalPlan.leadCoast = self.lead_coast_request
+    self.ease_coast_request, self.ease_coast_armed = ease_coast_gas_off(
+      self.ease_coast_level, self.output_a_target, self.ease_coast_blocked, self.ease_coast_request, self.ease_coast_armed)
+    longitudinalPlan.leadCoast = self.lead_coast_request or self.ease_coast_request
     force_stop_handoff = bool(
       sm['starpilotPlan'].forcingStop and (
         sm['starpilotPlan'].forcingStopLength < 1.0 or
