@@ -457,6 +457,7 @@ export const NavigationDestinationPanel = {
             this.isMetric,
             () => this.selectedRouteId,
           )
+          this.fitPreview([this.lastPosition.longitude, this.lastPosition.latitude], [place.longitude, place.latitude])
         } else {
           this.routeSummary = null
           this.routes = []
@@ -469,6 +470,20 @@ export const NavigationDestinationPanel = {
         this.selectedRouteId = "main"
         this.map.fitBounds([[this.lastPosition.longitude, this.lastPosition.latitude], [place.longitude, place.latitude]], { padding: 80, duration: 500 })
       }
+    },
+    fitPreview(start, dest) {
+      if (!this.map || window.innerWidth >= 768) return
+      this.$nextTick(() => {
+        const stage = this.$el?.getBoundingClientRect?.()
+        const card = this.$el?.querySelector?.(".gx-navigation-summary")?.getBoundingClientRect?.()
+        const tabs = document.querySelector(".gx-navigation-tabs")?.getBoundingClientRect?.()
+        if (!stage || !card) return
+        const top = Math.max(60, card.bottom - stage.top + 16)
+        const bottom = Math.max(40, (tabs ? window.innerHeight - tabs.top : 0) + 16)
+        const room = stage.height - top - bottom
+        if (room < 120) return
+        this.map.fitBounds([start, dest], { padding: { top, bottom, left: 40, right: 40 }, duration: 600 })
+      })
     },
     usePlace(place) { this.chooseSuggestion(place) },
   },
