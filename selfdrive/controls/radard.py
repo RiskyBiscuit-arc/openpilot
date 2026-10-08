@@ -544,6 +544,16 @@ NEWBORN_RANGE_CLOSING_STATIONARY_TOL = 5.0  # m/s; the slope may close at most t
 # Built in on for Bosch-A (owner, 2026-10-03; was the BoschANewbornLeads toggle): main() calls set_bosch_a_newborn_leads().
 NEWBORN_KF_FOLLOW_RANGE = True
 NEWBORN_KF_FOLLOW_MIN_SAMPLES = 4
+# The follow above stops at YOUNG_TRACK_MAX_AGE_S, but a Bosch-A track can stay unmeasured for longer. Its KF then
+# holds the last follow seed, and the first measured updates drag it to the measured speed, which the KF reads as
+# a hard deceleration. 000002f7 21:31 (bookmark 21:36): track 15 born 1287.56, last follow seed 1289.46 at 7.48 m/s
+# (range: lead slowing 7.7 -> 4.4 m/s), first measured sweep 1291.74 at 1.9 m/s (vision 1.2, range 4.4). aLeadK
+# went -1.51 -> -2.93 -> -5.09 -> -5.51 over 1.4 s while no source showed the lead slowing by more than ~1 m/s^2;
+# the planner went -0.65 -> -1.52. So on a track's first measured update, a follow seed older than
+# NEWBORN_KF_STALE_SEED_S is dropped and the KF starts at [measured vLead, 0], as stock does at birth. Only tracks
+# that had a follow seed are touched; vLead, vRel and the point are unchanged. Replay evidence only; not road-validated.
+NEWBORN_KF_STALE_RESEED = True
+NEWBORN_KF_STALE_SEED_S = 0.5
 
 # Newborn lead needs a proven closing (REPLAY ONLY, no DECISIONS entry yet). Fleet replay of the layers above (15
 # drives, 13 usable) found newborns already lead on sweeps 1-4 (span <= 0.20 s), on their range-slope vRel, while
@@ -916,6 +926,7 @@ class Track:
     # YOUNG_TRACK_FLAT_RANGE_BOUND: first update time and every fresh-sweep (t, dRel) of the track's first
     # YOUNG_TRACK_MAX_AGE_S. Coasted sweeps count: a Bosch-A coast holds vRel but publishes the live gated range.
     self.t_first = float('nan')
+    self._kf_follow_t = float('nan')  # time of the last NEWBORN_KF_FOLLOW_RANGE seed
     self.t_last = float('nan')  # NEWBORN_RANGE_CLOSING_EXEMPT: t_now of the latest update (the track's age)
     self.young_range_hist: list = []
     # D-077: -1 born on the low rail, +1 on the high rail, 0 not (yet); birth_rail_done ends the ramp for good.
@@ -1032,12 +1043,16 @@ class Track:
 
     if measurement_update and self.cnt > 0:
       self.kf.update(self.vLead)
+    elif NEWBORN_KF_STALE_RESEED and measurement_update and self.cnt == 0 and \
+         float(t_now) - self._kf_follow_t > NEWBORN_KF_STALE_SEED_S:
+      self.kf.set_x([[float(self.vLead)], [0.0]])
     elif NEWBORN_KF_FOLLOW_RANGE and newborn_follow and young_fresh and not measurement_update and self.cnt == 0 and \
          len(self.young_range_hist) >= NEWBORN_KF_FOLLOW_MIN_SAMPLES:
       a = np.array(self.young_range_hist, dtype=np.float64)
       slope = float(np.polyfit(a[:, 0] - a[-1, 0], a[:, 1], 1)[0])
       v_ego_aligned = float(v_lead) - float(v_rel)
       self.kf.set_x([[v_ego_aligned + max(slope, -v_ego_aligned)], [0.0]])
+      self._kf_follow_t = float(t_now)
 
     self.vLeadK = float(self.kf.x[SPEED][0])
     self.aLeadK = float(self.kf.x[ACCEL][0])
