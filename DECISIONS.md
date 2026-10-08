@@ -2016,7 +2016,7 @@ As a result, the commits were properly cherry-picked. The conflicts in `starpilo
 2. Safely removed the invalid `vision_lead=birth_vision` argument from `radard.py` to restore functionality.
 **Agent:** Gemini 3.8 Flash
 
-## D-089 — Far-range re-anchor lockout: relaxing the D-057 sigma test alone is rejected; trying it only with a camera check, plus one-way handoff smoothing (STATUS 225, 2026-10-08, in progress)
+## D-089 — Far-range re-anchor lockout: relaxing the D-057 sigma test alone is rejected; camera-checked recovery is a candidate; one-way handoff smoothing rejected as built (STATUS 225, 2026-10-08, replay only, not shipped)
 
 - **Finding.** `RANGE_SIGMA_RAW` grows with range (~0.08 x dRel), so every sweep beyond ~60 m counts as degraded and D-057 can never
   re-anchor a far lead after one range step. The lead is then camera-only until it comes close: 22 % (103 s) of camera-only lead time on 7
@@ -2024,7 +2024,13 @@ As a result, the commits were properly cherry-picked. The conflicts in `starpilo
 - **Rejected: range-scaled sigma test alone** (`BOSCH_A_REANCHOR_SIGMA_FRAC` 0.15 or "ignore"). It recovers far leads on 2f5 (8.8 -> 51.9 s)
   but the recovered U11 is wrong by 7-8 m/s on 2f2/2a4/2a6, over-closing (extra brakes) and under-closing (late brakes, 2a6). Do not ship it
   without a guard. The `BOSCH_A_RANGE_SIGMA_DEGRADED_RAW` constant itself is unchanged; it still gates the rest of the interface.
-- **Under test:** the same relaxation, but radard uses a recovered point only while a confident camera lead agrees with it (range, lateral,
-  speed); otherwise the shipped picture. Plus easing of handoff steps toward more braking over 0.5 s, never when the closing is confirmed
-  (TTC < 4 s, range trend or camera agree). D-041/D-042 hold: the camera check only withholds points the shipped build never had; the easing
-  is capped and bypassed on any confirmed closing. Closed-loop replay pending; nothing shipped.
+- **Candidate: camera-checked recovery.** The same relaxation, but the interface flags the point `recovered` and radard uses it only after
+  3 frames where a confident camera lead agrees on range, lateral and speed (dropped after 10 disagreeing frames). Closed-loop replay, 6
+  routes: +34 s radar lead on 2f5, no extra brake anywhere, one shipped dip removed; one genuine slowdown (2f5 16:44.5) crosses -1.0 0.6 s
+  later because it follows the radar's -3.4 m/s instead of the camera's inflated closing. Not shipped; owner to choose. A range-slope check
+  on the recovered track is the next guard if it goes further.
+- **Rejected: one-way handoff smoothing** (ease steps toward more braking over 0.5 s at a lead source change, bypass on TTC < 4 s or an
+  agreeing range/camera speed). On 6 routes it removed no meaningful extra brake and softened one genuine episode (268 10:21.7, -1.39 ->
+  -1.19) by easing a radar -> camera step. Extra brakes in these routes are not at handoffs. Do not retry it without a case where a
+  handoff step is the cause; if retried, never ease toward the camera when it is the only remaining sensor (D-042).
+- D-041/D-042 hold: the camera check only withholds points the shipped build never had.
