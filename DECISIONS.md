@@ -2117,3 +2117,25 @@ As a result, the commits were properly cherry-picked. The conflicts in `starpilo
   308 1.3 -> 0 s. Not modelled: the extra speed while coasting instead of braking (about +0.2 m/s^2 for 1-2 s, so under
   0.5 m/s), which the planner sees and answers with a lower target.
 - **Lever if a descent runs fast:** `BOSCH_HILL_BRAKE_MAX_ACCEL` (a small positive value brakes earlier), not removing the guard.
+
+## D-094 — The radar-only on-path brake (leadOnpath) ramps in instead of stepping to its cap (STATUS 230, 2026-10-09, replay only, not driven)
+
+- **Finding (route 00000308, 4:09.1, 40 mph).** Track 53 sat dead centre at 24 -> 23 m, closing 6 m/s, while the camera saw a
+  car at 106 m. radard published it as leadOnpath for two cycles (0.2 s) and withdrew it when its own leadOne went back to the
+  radar car at 76 m. `onpath_bounded_target` stepped the target from +0.48 to -1.00 in one cycle, and the brake release slew held
+  about 0.6 s of brake. Earlier, 00000297 30:18 (a stationary object on a curve edge) also drew a one-cycle step of 1.15.
+- **Shipped default on (`ONPATH_LEAD_ONSET_LIMIT`, `ONPATH_LEAD_ONSET_JERK` 2.5 m/s^3, longitudinal_planner.py).** The share of
+  braking that only leadOnpath asks for may pull the published target down by at most 2.5 m/s^3 from last cycle's output. This
+  planner's own target, so every leadOne/leadTwo brake and anything deeper than -ONPATH_LEAD_MAX_BRAKE, passes through as before;
+  the -1.0 cap and the adoption gate in radard are unchanged. 2.5 matches BRAKE_RELEASE_JERK; -0.3 -> -1.0 takes 0.28 s.
+- **Rejected for this item:**
+  - *Require the camera.* On 00000305 2:19.9 a real car at 61 m was leadOnpath while the camera's lead was at 83 m, and on 297
+    the stopped car had camera probability 0.00-0.28. A camera gate removes real cases.
+  - *Longer persistence.* It delays every real adoption: 297 31:08 had leadOnpath only 1.35 s before HEAD's radar lead.
+  Both remove a published radar point's authority outright; the ramp only slows a bounded brake (D-041/D-042/D-048).
+- **Evidence (closed-loop replay, current radard re-run from CAN, each variant drives its own simulated car, 13 windows):**
+  308 4:09 min target -1.00 -> +0.04, biggest 0.5 s drop 1.69 -> 0.42, 0.3 s of brake -> none; 297 30:18 biggest 0.5 s drop
+  1.24 -> 0.91. Identical in the other 11 windows, including the real stopped cars 297 31:08 and 46:56 (their on-path demand
+  already builds gradually), 2f2 13:16/15:10 (real leads leaving the lane) and 305 2:19.9.
+- **Lever if a real radar-only brake comes late:** `ONPATH_LEAD_ONSET_JERK` (larger is closer to the old step), not removing it.
+

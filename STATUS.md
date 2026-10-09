@@ -10917,4 +10917,24 @@ planner replay) needed only -1.4..-1.7 from geometry. That left out the lead's o
 -4 m/s^2 (2:21, range 58 -> 41 m in 1 s) and about -5 m/s^2 (9:22, closing -3 -> -10.9 m/s in 1.2 s, aLeadK down to -8.9). The
 -2.4 follows a real braking car and ramps in at about 0.15 per 0.1 s, so softening it would reduce a real hard brake.
 
-**(a)** (radar-only centre track) stays with the owner.
+**(a)** (radar-only centre track): see 230.
+
+## 230. (a) from STATUS 228, owner go-ahead 2026-10-09: the radar-only on-path brake ramps in (D-094). Closed-loop replay only, not driven.
+
+308 4:09.1: track 53 was leadOnpath for 0.2 s (24 m, dead centre, camera lead at 106 m) and stepped the target +0.48 -> -1.00 in
+one cycle. Now the leadOnpath share of a brake ramps in at 2.5 m/s^3; the -1.0 cap, the adoption gate and every leadOne brake are
+unchanged. Camera and persistence gates were rejected (305 2:19.9 real car with camera lead farther away; 297 31:08 adopted only
+1.35 s before HEAD).
+
+Closed-loop replay (scratch copy of alpha_closed_loop_replay with a ramp-off variant; radard re-run on current code; each
+variant drives its own simulated car), 13 windows on 297, 305, 308, 2a6, 2f2:
+
+| window | min target off -> on | biggest 0.5 s drop off -> on | brake below -0.3 off -> on |
+|---|---|---|---|
+| 308 4:09 (blip) | -1.00 -> +0.04 | 1.69 -> 0.42 | 0.30 s -> 0 |
+| 297 30:18 (object on a curve edge) | -1.74 -> -1.74 | 1.24 -> 0.91 | 7.75 -> 7.50 s |
+| 297 31:08, 46:56 (real stopped cars), 2f2 13:16, 15:10, 8:18, 8:30, 305 2:19.9, 308 2:52, 4:18, 8:00, 2a6 5:36 | identical | identical | identical |
+
+Simulated minimum gap is identical in every window; end speed differs only on 308 4:09 (+0.08 m/s, the brake not taken). 298 1018.35 no longer adopts (existence gate),
+so it is untouched. Planner tests 631 pass (3 new; the blip test fails with the ramp off). Not driven.
+

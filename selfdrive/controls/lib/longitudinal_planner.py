@@ -322,6 +322,17 @@ REASSOC_LEAD_BOUND = True
 # road evidence either way.
 ONPATH_LEAD_BOUND = True
 ONPATH_LEAD_MAX_BRAKE = 1.0
+# D-094 onset ramp (replay only, not driven). The extra braking leadOnpath adds may pull the published target down
+# at most ONPATH_LEAD_ONSET_JERK * dt per cycle from last cycle's output. Route 00000308--2d74665430 4:09.1 (40 mph):
+# track 53 sat dead centre at 24 -> 23 m closing 6 m/s while the camera saw a car at 106 m; it was leadOnpath for
+# two cycles (0.2 s) before radard's leadOne went back to the radar car at 76 m, and that stepped the target
+# +0.48 -> -1.00 in one cycle and held a 0.6 s brake. With the ramp it eases toward -1.0 instead of snapping there.
+# Only the leadOnpath share is slowed: this planner's own target, and so every brake from leadOne/leadTwo and
+# every target deeper than -ONPATH_LEAD_MAX_BRAKE, passes through as before, and the cap itself is unchanged.
+# 2.5 m/s^3 matches BRAKE_RELEASE_JERK: -0.3 -> -1.0 takes 0.28 s (297 31:08 had leadOnpath 1.35 s before
+# HEAD's radar lead). Nothing is deleted and no range is moved (D-041/D-042).
+ONPATH_LEAD_ONSET_LIMIT = True
+ONPATH_LEAD_ONSET_JERK = 2.5  # m/s^3
 
 
 # Brake release rate limit (replay only, no road evidence). While the previous published target is a brake
@@ -781,6 +792,14 @@ def onpath_lead_view(sm):
 def onpath_bounded_target(own: float, with_onpath: float) -> float:
   """The on-path lead may lower the target by at most down to -ONPATH_LEAD_MAX_BRAKE, and never raise it."""
   return float(np.clip(with_onpath, min(own, -ONPATH_LEAD_MAX_BRAKE), own))
+
+
+def onpath_onset_limited_target(own: float, bounded: float, prev: float, dt: float) -> float:
+  """ONPATH_LEAD_ONSET_LIMIT: the on-path share of a brake (own - bounded) may lower the output at most
+  ONPATH_LEAD_ONSET_JERK * dt below last cycle's output `prev`. Never above own, never below bounded."""
+  if not ONPATH_LEAD_ONSET_LIMIT or bounded >= own:
+    return float(bounded)
+  return float(max(bounded, min(own, prev - ONPATH_LEAD_ONSET_JERK * dt)))
 REASSOC_LEAD_WINDOW_FRAMES = 30         # 1.5 s of history per radar track
 REASSOC_LEAD_MIN_OFFSET_M = 10.0        # track was this far beyond the vision lead ...
 REASSOC_LEAD_MIN_DROP_M = 6.0           # ... and its range has since dropped this much
@@ -3202,6 +3221,7 @@ class LongitudinalPlanner:
     return floor
 
   def update(self, sm, starpilot_toggles):
+    prev_output = float(self.output_a_target)
     self._update(sm, starpilot_toggles)
     if self.onpath_planner is None:
       return
@@ -3209,7 +3229,9 @@ class LongitudinalPlanner:
     self.onpath_planner._update(onpath_sm if onpath_sm is not None else sm, starpilot_toggles)
     self.onpath_bound_active = onpath_sm is not None
     if self.onpath_bound_active:
-      self.output_a_target = onpath_bounded_target(self.output_a_target, self.onpath_planner.output_a_target)
+      own = self.output_a_target
+      bounded = onpath_bounded_target(own, self.onpath_planner.output_a_target)
+      self.output_a_target = onpath_onset_limited_target(own, bounded, prev_output, self.dt)
 
   def _update(self, sm, starpilot_toggles):
     if self.bound_off_axis_radar_leads:
