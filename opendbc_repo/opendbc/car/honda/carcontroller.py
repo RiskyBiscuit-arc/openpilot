@@ -62,6 +62,18 @@ BOSCH_BRAKE_FORCE_RELEASE = -0.02
 # (LEAD_COAST_MIN); anything deeper than this is a real brake and goes through the normal selection. Route 000002f8:
 # the -0.30..-0.40 coast targets became brake taps with brake lights (36 gas<->brake flips). Static + replay only.
 BOSCH_LEAD_COAST_MIN_ACCEL = -0.6
+# Positive target on a descent (D-093): the force above includes the hill term, so on a downhill a positive target
+# (planner wants to gain speed) can fall under BOSCH_BRAKE_FORCE_ON and go out as a brake request with brake lights.
+# Route 00000308 6:07.5 (42 mph, pitch -0.037, target +0.14..+0.17): force -0.12 -> 1.7 s of brake mode, aEgo fell from
+# +0.3 to about 0 while the planner asked for +0.15. With the target above BOSCH_HILL_BRAKE_MAX_ACCEL brake mode is not
+# entered (gas off, no brake: the car coasts and gravity gives it the speed it asked for), and an active brake mode lets go
+# once the target rises past BOSCH_HILL_BRAKE_RELEASE_ACCEL. A target at or below 0 brakes exactly as before, so this
+# never delays a planner brake. The release margin keeps a target hovering near 0 on a long descent from flipping
+# brake <-> coast: at 0.10, 0000026b 12:11 (9 m/s, pitch -0.03, target swinging -0.15..+0.20) let go for 0.2 s at +0.10
+# and braked again; 0.20 adds no brake episode on the 9 replayed routes. Static + replay only.
+BOSCH_HILL_BRAKE_GUARD = True
+BOSCH_HILL_BRAKE_MAX_ACCEL = 0.0      # m/s^2, brake mode is entered only at or below this target
+BOSCH_HILL_BRAKE_RELEASE_ACCEL = 0.20  # m/s^2, brake mode ends once the target is above this
 
 
 def get_eps_modified_steering_pressed(
@@ -253,14 +265,23 @@ def honda_bosch_lead_coast(coast: bool, accel: float, stopping: bool, long_activ
   return bool(coast and long_active and not stopping and BOSCH_LEAD_COAST_MIN_ACCEL <= accel <= 0.0)
 
 
-def update_honda_bosch_braking(braking: bool, gas_pedal_force: float, stopping: bool, long_active: bool) -> bool:
-  """Select Bosch brake mode from the same road-load-adjusted force used for gas."""
+def update_honda_bosch_braking(braking: bool, gas_pedal_force: float, stopping: bool, long_active: bool,
+                               accel: "float | None" = None) -> bool:
+  """Select Bosch brake mode from the same road-load-adjusted force used for gas.
+
+  accel is the planner's target; when given, a positive target is not turned into a brake by the hill term (D-093).
+  """
   if not long_active:
     return False
   if stopping:
     return True
+  guard = BOSCH_HILL_BRAKE_GUARD and accel is not None
   if braking:
+    if guard and accel > BOSCH_HILL_BRAKE_RELEASE_ACCEL:
+      return False
     return gas_pedal_force <= BOSCH_BRAKE_FORCE_RELEASE
+  if guard and accel > BOSCH_HILL_BRAKE_MAX_ACCEL:
+    return False
   return gas_pedal_force < BOSCH_BRAKE_FORCE_ON
 
 
@@ -1160,7 +1181,7 @@ class CarController(CarControllerBase):
             self.bosch_braking = False
             gas_pedal_force = min(gas_pedal_force, min_gas)  # create_acc_commands sends GAS -30000 at or below min_gas
           else:
-            self.bosch_braking = update_honda_bosch_braking(self.bosch_braking, gas_pedal_force, stopping, CC.longActive)
+            self.bosch_braking = update_honda_bosch_braking(self.bosch_braking, gas_pedal_force, stopping, CC.longActive, accel)
           self.stopping_counter = self.stopping_counter + 1 if stopping else 0
           can_sends.extend(
             hondacan.create_acc_commands(self.packer, self.CAN, CC.enabled, CC.longActive, self.accel, self.gas,

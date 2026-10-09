@@ -116,6 +116,31 @@ class TestHondaFingerprint:
     assert update_honda_bosch_braking(False, 0.5, True, True)
     assert not update_honda_bosch_braking(True, -1.0, False, False)
 
+  def test_bosch_braking_positive_target_on_a_descent_does_not_brake(self):
+    # D-093, route 00000308 6:07.5: target +0.15 on a 3.7 % descent, force -0.12 after the hill term
+    assert update_honda_bosch_braking(False, -0.15, False, True)
+    assert not update_honda_bosch_braking(False, -0.15, False, True, accel=0.15)
+    assert not update_honda_bosch_braking(False, -0.5, False, True, accel=cc_mod.BOSCH_HILL_BRAKE_MAX_ACCEL + 0.01)
+
+  @pytest.mark.parametrize("accel", [0.0, -0.1, -0.5, -2.0])
+  def test_bosch_braking_zero_or_negative_target_brakes_as_before(self, accel):
+    for force in (BOSCH_BRAKE_FORCE_ON - 0.01, -1.0, -3.0):
+      assert update_honda_bosch_braking(False, force, False, True, accel=accel) == update_honda_bosch_braking(False, force, False, True)
+    assert update_honda_bosch_braking(True, -0.05, False, True, accel=accel)
+
+  def test_bosch_braking_releases_once_target_rises_past_margin(self):
+    braking = update_honda_bosch_braking(False, -0.3, False, True, accel=-0.05)
+    assert braking
+    assert update_honda_bosch_braking(braking, -0.3, False, True, accel=0.05)  # inside the margin: no flip
+    assert not update_honda_bosch_braking(braking, -0.3, False, True, accel=cc_mod.BOSCH_HILL_BRAKE_RELEASE_ACCEL + 0.01)
+
+  def test_bosch_braking_stopping_ignores_the_guard(self):
+    assert update_honda_bosch_braking(False, 0.5, True, True, accel=0.3)
+
+  def test_bosch_braking_guard_switch_off_restores_old_rule(self, monkeypatch):
+    monkeypatch.setattr(cc_mod, "BOSCH_HILL_BRAKE_GUARD", False)
+    assert update_honda_bosch_braking(False, -0.15, False, True, accel=0.15)
+
   def test_honda_lkas_hud_shows_lane_lines_when_lateral_only_is_active(self):
     class FakePacker:
       @staticmethod

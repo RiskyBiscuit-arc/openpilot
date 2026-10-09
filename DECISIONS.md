@@ -2099,3 +2099,21 @@ As a result, the commits were properly cherry-picked. The conflicts in `starpilo
     under-delivers, the planner target deepens out of the window and the brake comes back.
 - **Lever if the next drive closes on slow far leads too late or runs wide in curves:** the -0.10 upper bound and the coast
   margin, not removing the coast.
+
+## D-093 — On Honda Bosch a positive planner target is not turned into a brake by the hill term (STATUS 229, 2026-10-09, replay only, not driven)
+
+- **Finding (route 00000308, 6:07.5, 42 mph, no lead).** The planner asked for +0.14..+0.17 on a 3.7 % descent (logged pitch
+  -0.037). The carcontroller's brake choice uses the road-load-adjusted force (target + wind + hill term), which fell to -0.12,
+  so the car went into brake mode for 1.3-1.7 s with brake lights; aEgo fell from about +0.3 to about 0 against a +0.15 target.
+- **Shipped default on, Honda Bosch only:** `BOSCH_HILL_BRAKE_GUARD` in `update_honda_bosch_braking`.
+  - Brake mode is not entered while the target is above `BOSCH_HILL_BRAKE_MAX_ACCEL` (0.0). The frame goes out as gas off with no
+    brake request, and gravity gives the car the speed the planner asked for.
+  - Brake mode already on ends once the target is above `BOSCH_HILL_BRAKE_RELEASE_ACCEL` (0.20); otherwise the old force release.
+  - A target at or below 0 brakes exactly as before, and stopping is untouched, so no planner brake is delayed or reduced.
+- **Tried:** a 0.10 release margin let go for 0.2 s and braked again on 0000026b 12:11 (9 m/s, target swinging -0.15..+0.20).
+  0.20 adds no brake episode on any replayed route.
+- **Evidence (replay of the brake-mode choice on logged targets, 9 routes):** brake episodes never go up (26b 64 -> 62,
+  2a4 36 -> 34, 308 29 -> 28, the rest equal); brake time at a positive target at speed 26b 10.3 -> 6.1 s, 2a4 2.2 -> 0.6 s,
+  308 1.3 -> 0 s. Not modelled: the extra speed while coasting instead of braking (about +0.2 m/s^2 for 1-2 s, so under
+  0.5 m/s), which the planner sees and answers with a lower target.
+- **Lever if a descent runs fast:** `BOSCH_HILL_BRAKE_MAX_ACCEL` (a small positive value brakes earlier), not removing the guard.

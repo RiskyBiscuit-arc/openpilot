@@ -10894,3 +10894,27 @@ Builds: 305 ran Jetlink-Port 64b4bb202 (before the lowMemory fix) and 308 ran 23
 **Not long control:** 305's lowMemory soft disables at 2:35.7 and 3:34.0 both came within 5 s of a stop. The 3:33.5 one came with commIssue and selfdrivedLagging. That is the memory problem 2304d0f40 addressed, not the planner.
 
 **Open, for the owner to choose:** (a) require the camera, or longer persistence, before the on-path planner brakes for a radar-only centre track at speed; (b) rate-limit the close-lead cap when TTC > 8 s; (c) keep the hill term from turning a positive target into a brake. Nothing built.
+
+## 229. The three remaining 305/308 items from STATUS 228, owner go-ahead for (b)-(d) (via Metadrive Sim, 2026-10-08/09): one shipped, two not. Replay only, not driven.
+
+Owner's rule: build only what makes the driving smoother, with no new jerk anywhere in replay and no delay of real hard braking.
+
+**(c) Downhill brake at a positive target: shipped (D-093).** 308 6:07.5: a +0.15 target on a 3.7 % descent went out as 1.3-1.7 s
+of brake mode because the hill term pushed the force under -0.12. Now Honda Bosch does not enter brake mode while the planner's
+target is above 0, and lets an active brake go once the target is above +0.20. Replaying the brake choice on 9 routes: no route gains
+a brake episode, the 308 brake is gone, and brake time at a positive target falls on 26b (10.3 -> 6.1 s) and 2a4 (2.2 -> 0.6 s).
+Honda tests 408 pass (5 new). Not driven.
+
+**(b) Far-lead cap ramp: not shipped.** Five versions ramped the close-lead cap in for far leads (TTC >= 8 s). Closed-loop replay
+(fitted plant, 25 events), biggest 0.5 s brake step, before -> after: 308 4:38 1.56 -> 0.56, 2a4 18:29 1.14 -> 0.14, 2a6 2:42
+0.98 -> 0.09, 2a4 25:14 1.09 -> 0.17. But 305 7:42 0.83 -> 1.09, 2a6 15:08 1.19 -> 1.30-1.49 and 2a6 1:54 0.82 -> 1.01 got
+worse in every version: there a far lead turns into a real hard brake, the hard demand has to apply at once (the off-axis straight-lead
+tests need it), and the brake held back arrives as one step. Open loop it also cut per-frame drops 107 -> 71 but raised 2f2 14 -> 16.
+The patch is kept outside the repo, not committed.
+
+**(d) Lead-jump "overshoot": not a fault; nothing built.** STATUS 228 estimated 305 2:15 / 9:15 (route clock 2:21.7 / 9:22.2 in the
+planner replay) needed only -1.4..-1.7 from geometry. That left out the lead's own decel. By range rate the lead slowed at about
+-4 m/s^2 (2:21, range 58 -> 41 m in 1 s) and about -5 m/s^2 (9:22, closing -3 -> -10.9 m/s in 1.2 s, aLeadK down to -8.9). The
+-2.4 follows a real braking car and ramps in at about 0.15 per 0.1 s, so softening it would reduce a real hard brake.
+
+**(a)** (radar-only centre track) stays with the owner.
