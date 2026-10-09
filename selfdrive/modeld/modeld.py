@@ -9,6 +9,11 @@ import usb1
 from openpilot.system.hardware import HARDWARE, TICI
 os.environ['GMMU'] = '0'
 os.environ['DEV'] = 'QCOM' if TICI else 'LLVM'
+# jetlink's prepare() starts tinygrad's compile pool before modeld goes
+# realtime, sized PARALLEL = cpu count. 8 spawn workers held ~270 MB on a
+# 3.6 GB mici and pushed it past selfdrived's 90% lowMemory soft-disable; the
+# small model is a prebuilt pickle, so only the link's few runtime kernels use it
+os.environ.setdefault('PARALLEL', '2')
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 import time
