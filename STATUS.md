@@ -10863,3 +10863,34 @@ Tests: controls + Honda 2504 passed (5 new in `test_brake_onset.py`); the 2 fail
 **Watch on the next drive:**
 - Fewer brake-light blips when easing to the set speed, behind a far car, or into a curve.
 - Any time it feels like it waits too long to slow for a slow far car, or runs a little fast into a curve.
+
+## 228. First drives with D-092: routes 00000305 and 00000308 (Jetlink-Port, 2026-10-08). No code change. Owner (via the Metadrive Sim session): wants the longitudinal analysis of 305; 308 was done first. Log decode + open-loop planner replay only. Limited road evidence: two drives, both with lowMemory trouble.
+
+Builds: 305 ran Jetlink-Port 64b4bb202 (before the lowMemory fix) and 308 ran 2304d0f40. Both logs carry initData commit eebb42a38. All three contain D-091 and D-092, and their `longitudinal_planner.py`, `radard.py` and Honda `carcontroller.py` match IQ-stop-C 514c2b76b, so everything below applies to IQ-stop-C.
+
+| | 305 | 308 | 300 (D-091 only) |
+|---|---|---|---|
+| engaged long | 7.5 min of 13.4 | 12.9 min | 20.5 min |
+| true coast | **16.7 %** | 10.7 % | 10.6 % |
+| light brake taps | 5 (0.66/min) | 4 (0.31/min) | 12 (0.59/min) |
+| gas<->brake flips | 20 (2.65/min) | 33 (2.55/min) | 2.10/min |
+| brake episodes | 19 (2.52/min) | 32 (2.48/min) | 2.34/min |
+
+**Taps.** 305: four of five are creeping at 1.5-2 m/s in a queue (lead 9-11 m); the fifth is one 0.02 s frame. None at speed. 308: three are creep (1:06-1:42), and 6:07.5 is a 1.7 s brake at a *positive* target (+0.15) on a 2-3.5 % downhill at 42 mph, no lead. On that grade the coast estimate is about -0.10, so +0.15 should be gas; the hill term pushed it into the brake (inferred from the logged pitch; not replayed through the car controller).
+
+**Flips are mostly stop-and-go, not highway.** 305: 13 of 20 under 7 mph. 308: 14 of 33 under 3 mph (standstill hand-offs at -1.0), 2 more under 13 mph. At speed: 305 about 0.8/min, 308 about 1.5/min. No difference inside vs outside the Jetlink large-model windows on 308 (1.4/min large, 2.4/min small, few events).
+
+**308 highway jabs (planner replay reproduces both on segment 4):**
+- 4:09.3, 40 mph, 0.5 s brake. The *on-path* planner braked to its -1.0 bound (`onpath_bounded_target`) for radar track 53: dead centre (y -0.5 to -0.2), 28 to 23 m, closing at 6 m/s, measured for at least 0.8 s. The camera never saw it (model lead 80-109 m), and the main lead was flipping between the radar car at 72 m and vision at 105 m. The MPC wanted +1.1 the whole time. The bound did its job (D-041/D-042: publish a bound, don't delete), but it is still an extra brake. Track 53 was not a real car stopping in front of us, but it is also not proven a ghost.
+- 4:38.3, 51 mph, 0.65 s brake. `get_close_lead_brake_cap` snapped the target from +0.12 to -1.11 in one frame for a real radar lead at 56 m, TTC about 13 s, because its aLeadK spiked to -1.3..-1.6 for about 0.2 s (vRel -3.1 to -4.35, then back to -2.1). The MPC followed one frame later.
+
+**305 hard brakes (four at -2.3 or deeper), all with a real lead slowing:**
+- 3:20.7, -3.50 at 37 mph: the lead braked hard from 33 m (closing went from 1 to 5.5 m/s in 1.5 s); we stopped 3.8 m behind it. The D-091 coast was on until vRel -1.2, then the brake ramped up in 1.5 s. Proportionate to the lead, not late by more than about 0.5 s.
+- 7:42.9, -2.50 at 50 mph: coasting 45 m behind at matched speed, the lead braked (closing to 3.8 m/s in 1.5 s).
+- 2:15.1, -2.43 at 32 mph, and 9:15.3, -2.33 at 44 mph: Experimental mode was already easing for slow traffic far ahead (-0.4 to -1.0). The radar lead then jumped to a nearer, slower car at 52-57 m closing 6.6-10.6 m/s, and the MPC stepped down. The geometry needed about -1.4 to -1.7 (inferred), so these overshoot by about 0.7.
+
+**D-092 on the road.** Coast share on 305 is the highest logged so far (16.7 %). On 308, 1370 frames had leadCoast; about 250 were the D-092 ease case (no lead within 60 m), the rest D-091. No tap on either drive came out of an ease coast. 305's 0.02 s blip at 6:13.9 came at the end of a D-091 lead coast (lead at 61 m, closing at 4.6 m/s).
+
+**Not long control:** 305's lowMemory soft disables at 2:35.7 and 3:34.0 both came within 5 s of a stop. The 3:33.5 one came with commIssue and selfdrivedLagging. That is the memory problem 2304d0f40 addressed, not the planner.
+
+**Open, for the owner to choose:** (a) require the camera, or longer persistence, before the on-path planner brakes for a radar-only centre track at speed; (b) rate-limit the close-lead cap when TTC > 8 s; (c) keep the hill term from turning a positive target into a brake. Nothing built.
