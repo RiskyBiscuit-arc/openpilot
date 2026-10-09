@@ -306,7 +306,6 @@ class StarPilotVCruise:
     csc_was_controlling = self.csc_controlling_speed
 
     csc_accel_button = (bool(sm["starpilotCarState"].accelPressed) and not self.slc.confirmation_pending and not self.slc.confirmation_button_consumed)
-    
 
     if csc_was_controlling and csc_accel_button:
       self.csc_override = True
