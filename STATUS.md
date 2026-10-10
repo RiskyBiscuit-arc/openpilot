@@ -11,7 +11,8 @@ Repo: StarPilot / openpilot fork `openpilot-radar`. Working branch
 2026-09-30 and survives as tag `archive/claude/radar-testing-state-88vt2t`.) Branches deleted in that
 cleanup are cited below as their `archive/<name>` tags. For the current tip, trust `git log`, not this line.
 
-**Latest work (2026-10-10), start here:** item 257 (synced Trung through
+**Latest work (2026-10-10), start here:** item 258 (comma 3X JetLink onroad status icon).
+Then item 257 (synced Trung through
 `5c8eebabf9322f4738d7a1e014aba4e075759811`). Items 251-256 describe its radar and
 longitudinal changes; replay/static evidence only, not driven. Then item 250
 (added the missing offroad-only Galaxy JetLink mode selector). Then item 249 (synced Trung through
@@ -11498,3 +11499,16 @@ the checkout contains the comma's aarch64 `msgq/ipc_pyx.so`; no local native reb
 replay, live radar/fusion timing, closed-loop vehicle response, comma/JetLink handoff, or road
 validation was performed. The incoming radar and braking claims remain bound to Trung's
 recorded replay evidence and source commit, not to this merge validation.
+
+## 258. Comma 3X onroad UI now displays JetLink model-source state (D-117, 2026-10-10). Static only.
+
+`[CONFIRMED against bfc12342b2 by static inspection]` The large-UI `ModelSourceWidget` now becomes visible for
+a nonzero `JetlinkLink`, polls `jetlink_adapter.status()` once per second, and uses the same
+state meanings as the comma 4 HUD: green for an active JetLink big model, orange for a ready
+link while the local small model supplies predictions, pulsing during loading, and crossed
+for a missing host or failure. With JetLink off, the existing `UsbGpu` behavior is unchanged.
+
+Ruff and Python bytecode compilation pass for the widget and its tests. The focused UI test
+cannot collect on this Apple-silicon Mac because importing `ui_state` loads the checked-in
+comma aarch64 `msgq/ipc_pyx.so`. No rendered C3X UI, live JetLink host/model handoff, comma
+installation, or road validation was performed.
