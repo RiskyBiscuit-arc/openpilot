@@ -96,10 +96,11 @@ def _params_client(monkeypatch, values, device_type):
     the_galaxy,
     "_get_param_type_info",
     lambda: (
-      {"AlphaLongitudinalEnabled", "ForceOffroad", "StarpilotAutoEnabled"},
+      {"AlphaLongitudinalEnabled", "ForceOffroad", "JetlinkLink", "StarpilotAutoEnabled"},
       {
         "AlphaLongitudinalEnabled": bool,
         "ForceOffroad": bool,
+        "JetlinkLink": int,
         "StarpilotAutoEnabled": bool,
       },
     ),
@@ -742,6 +743,66 @@ def test_alpha_longitudinal_toggle_writes_and_requests_offroad_cycle(monkeypatch
     ("AlphaLongitudinalEnabled", True),
     ("OnroadCycleRequested", True),
   ]
+
+
+def test_jetlink_mode_can_be_enabled_from_galaxy_while_offroad(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {
+    "GalaxyDeveloperMode": True,
+    "IsOnroad": False,
+    "JetlinkLink": 0,
+  }, "tici")
+
+  response = client.put("/api/params", json={"key": "JetlinkLink", "value": 1})
+
+  assert response.status_code == 200
+  assert response.get_json() == {
+    "message": "JetLink set to USB.",
+    "updated": {"JetlinkLink": 1},
+  }
+  assert fake_params.values["JetlinkLink"] == "1"
+  assert fake_params.writes == [("JetlinkLink", "1")]
+
+
+def test_jetlink_mode_requires_galaxy_developer_mode(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {
+    "GalaxyDeveloperMode": False,
+    "IsOnroad": False,
+    "JetlinkLink": 0,
+  }, "tici")
+
+  response = client.put("/api/params", json={"key": "JetlinkLink", "value": 1})
+
+  assert response.status_code == 403
+  assert response.get_json()["error"] == "JetlinkLink is available only with Galaxy Developer Mode enabled."
+  assert fake_params.writes == []
+
+
+def test_jetlink_mode_rejects_onroad_change(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {
+    "GalaxyDeveloperMode": True,
+    "IsOnroad": True,
+    "JetlinkLink": 0,
+  }, "tici")
+
+  response = client.put("/api/params", json={"key": "JetlinkLink", "value": 1})
+
+  assert response.status_code == 403
+  assert response.get_json()["error"] == "Cannot change JetLink while driving."
+  assert fake_params.writes == []
+
+
+def test_jetlink_mode_rejects_invalid_values(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {
+    "GalaxyDeveloperMode": True,
+    "IsOnroad": False,
+    "JetlinkLink": 0,
+  }, "tici")
+
+  for value in (-1, 3, True, "usb"):
+    response = client.put("/api/params", json={"key": "JetlinkLink", "value": value})
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "JetLink must be Off (0), USB (1), or iOS (2)."
+  assert fake_params.writes == []
 
 
 def test_alpha_longitudinal_toggle_rejects_onroad(monkeypatch):

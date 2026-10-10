@@ -5664,6 +5664,31 @@
         "settings_tier": "simple"
       },
       {
+        "key": "JetlinkLink",
+        "label": "JetLink",
+        "description": "Run a large driving model on a connected Mac, Jetson, NVIDIA PC, iPhone, iPad, or Android device. USB is used for computers and Android; iOS is used for iPhone and iPad. Change this only while parked and offroad.",
+        "picker_description": "Chooses the external JetLink model host connection.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Off"
+          },
+          {
+            "value": 1,
+            "label": "USB"
+          },
+          {
+            "value": 2,
+            "label": "iOS"
+          }
+        ],
+        "parent_key": "GalaxyDeveloperMode",
+        "requires_offroad": true,
+        "settings_tier": "advanced"
+      },
+      {
         "key": "ClusterOffset",
         "label": "Dashboard Speed Offset",
         "description": "Multiplier for dashboard speed. 1x = no offset; 1.05x = 5% faster.",

@@ -103,7 +103,7 @@ def test_galaxy_layout_contains_basic_mode_controls():
   assert sections["Longitudinal (Speed & Following)"]["PulseGlideSpeedDelta"]["parent_key"] == "QOLLongitudinal"
   assert sections["Longitudinal (Speed & Following)"]["PulseGlideSpeedDelta"]["settings_tier"] == "advanced"
   assert "PulseGlideSpeedDelta" not in sections["Developer"]
-  assert {"AlphaLongitudinalEnabled", "ForceOffroad", "GalaxyDeveloperMode"} <= sections["Developer"].keys()
+  assert {"AlphaLongitudinalEnabled", "ForceOffroad", "GalaxyDeveloperMode", "JetlinkLink"} <= sections["Developer"].keys()
 
 
 def test_galaxy_exposes_every_raylib_nrdr_control_and_omits_pruned_helpers():
@@ -402,6 +402,17 @@ def test_requested_simple_and_advanced_settings_tiers():
   assert vision["VisionSpeedLimitLowLimitThreshold"]["settings_tier"] == "advanced"
 
   assert developer["GalaxyDeveloperMode"]["settings_tier"] == "simple"
+  assert _declared_default("JetlinkLink") == "0"
+  assert developer["JetlinkLink"]["parent_key"] == "GalaxyDeveloperMode"
+  assert developer["JetlinkLink"]["requires_offroad"] is True
+  assert developer["JetlinkLink"]["data_type"] == "int"
+  assert developer["JetlinkLink"]["ui_type"] == "dropdown"
+  assert developer["JetlinkLink"]["options"] == [
+    {"value": 0, "label": "Off"},
+    {"value": 1, "label": "USB"},
+    {"value": 2, "label": "iOS"},
+  ]
+  assert developer["JetlinkLink"]["settings_tier"] == "advanced"
   assert developer["AlphaLongitudinalEnabled"]["parent_key"] == "GalaxyDeveloperMode"
   assert developer["AlphaLongitudinalEnabled"]["requires_offroad"] is True
   assert developer["AlphaLongitudinalEnabled"]["settings_tier"] == "advanced"

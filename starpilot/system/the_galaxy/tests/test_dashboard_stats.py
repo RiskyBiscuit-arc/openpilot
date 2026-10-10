@@ -152,6 +152,19 @@ def _install_server_import_stubs():
 
   sys.modules["opendbc.can.parser"] = _simple_module("opendbc.can.parser", CANParser=lambda *args, **kwargs: SimpleNamespace())
   sys.modules["opendbc.car.gm.values"] = _simple_module("opendbc.car.gm.values", GMFlags=SimpleNamespace(SASCM=SimpleNamespace(value=1)))
+  sys.modules["opendbc.car.honda.values"] = _simple_module(
+    "opendbc.car.honda.values",
+    CAR=SimpleNamespace(HONDA_CLARITY="HONDA CLARITY", HONDA_CIVIC_BOSCH="HONDA CIVIC 2019"),
+    HONDA_BOSCH_A=set(),
+    HondaFlags=SimpleNamespace(EPS_MODIFIED=1),
+  )
+  sys.modules["openpilot.selfdrive.pandad"] = _simple_module("openpilot.selfdrive.pandad")
+  sys.modules["openpilot.selfdrive.pandad.panda_firmware"] = _simple_module(
+    "openpilot.selfdrive.pandad.panda_firmware",
+    firmware_flags_conflict=lambda *args, **kwargs: False,
+    supports_tesla_can_wake=lambda *args, **kwargs: False,
+    validate_tesla_can_wake_firmware=lambda *args, **kwargs: None,
+  )
   sys.modules["opendbc.car.toyota.carcontroller"] = _simple_module("opendbc.car.toyota.carcontroller", LOCK_CMD=b"", UNLOCK_CMD=b"")
   sys.modules["opendbc.car.toyota.values"] = _simple_module(
     "opendbc.car.toyota.values",

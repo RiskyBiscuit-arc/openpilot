@@ -233,7 +233,7 @@ LEGACY_LATERAL_METHOD_API_PREFIX = "/api/" + "".join(("f", "t", "m"))
 VASM_CONFIGURATION_KEYS = {"VASMEnabled", "VASMConfidenceThreshold", "VASMSmoothSeconds", "VASMAnnotationConfig"}
 PIP_PREVIEW_CONFIGURATION_KEYS = {"PIPPreviewEnabled", "PIPPreviewMask", "PIPPreviewShowOnBlinker", "PIPPreviewShowOnBSM", "PIPPreviewInvert"}
 MODEL_SMOOTHING_KEYS = {"LatSmoothSeconds", "LongSmoothSeconds"}
-GALAXY_DEVELOPER_ONLY_KEYS = {"TurnSteeringLimitMuteSpeed"}
+GALAXY_DEVELOPER_ONLY_KEYS = {"JetlinkLink", "TurnSteeringLimitMuteSpeed"}
 # The existing upload settings that stop uploads while driving; uploads resume once parked.
 # DeviceManagement gates NoUploads, and AlwaysAllowUploads overrides both.
 STARPILOT_AUTO_UPLOAD_SETTINGS = starpilot_auto_identity.UPLOAD_SETTINGS
@@ -6726,6 +6726,20 @@ def setup(app):
 
       if key in GALAXY_DEVELOPER_ONLY_KEYS and not params.get_bool("GalaxyDeveloperMode"):
         return jsonify({"error": f"{key} is available only with Galaxy Developer Mode enabled."}), 403
+
+      if key == "JetlinkLink":
+        if params.get_bool("IsOnroad"):
+          return jsonify({"error": "Cannot change JetLink while driving."}), 403
+        if type(data["value"]) is not int or data["value"] not in range(3):
+          return jsonify({"error": "JetLink must be Off (0), USB (1), or iOS (2)."}), 400
+
+        mode = data["value"]
+        params.put("JetlinkLink", str(mode))
+        update_starpilot_toggles()
+        return jsonify({
+          "message": f"JetLink set to {('Off', 'USB', 'iOS')[mode]}.",
+          "updated": {"JetlinkLink": mode},
+        }), 200
 
       if key in SENTRY_NUMERIC_PARAM_BOUNDS:
         minimum, maximum = SENTRY_NUMERIC_PARAM_BOUNDS[key]

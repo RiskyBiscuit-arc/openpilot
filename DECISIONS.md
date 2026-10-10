@@ -2447,3 +2447,19 @@ a positive target may only rise at `COAST_RESUME_JERK` 0.1 m/s^3 until the cap p
 are lowered; braking is never limited. Same replay, 41 coast ends, rate sweep 0.1/0.2/0.4: 0.1 cut the 4 s peak p90
 +0.51 -> +0.40 and the median time to +0.15 from 1.1 to 1.6 s, min gap/follow 0.46 -> 0.50, mean speed -0.07 m/s;
 0.2 and 0.4 matched no cap. The replay does not model the D-108 gas ramp, so the two together are untested.
+
+## D-110 — Galaxy may change JetLink mode only while offroad and with Developer Mode enabled
+
+**Decided 2026-10-09; static/API-test evidence only, no live host or road validation.** The
+JetLink port already exposed `Off`/`USB`/`iOS` on the comma's native Developer screen, but
+Galaxy only displayed link status and big-model selection while instructing the user to use
+the missing Developer control. Galaxy's Developer section now exposes the same three-value
+`JetlinkLink` parameter as an advanced dropdown.
+
+The server, not only the browser, enforces the contract: writes require Galaxy Developer
+Mode, are rejected while `IsOnroad`, and accept only integer values 0, 1, or 2. This avoids
+starting or replacing the USB/iOS owner while driving and prevents malformed values from
+reaching the manager. The default remains 0 (`Off`); installing or updating the branch does
+not enable JetLink. A dedicated endpoint was rejected as unnecessary because the existing
+typed parameter API already provides authoritative readback and both Galaxy surfaces render
+the shared settings catalog.
