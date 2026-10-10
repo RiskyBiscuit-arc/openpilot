@@ -11,8 +11,9 @@ Repo: StarPilot / openpilot fork `openpilot-radar`. Working branch
 2026-09-30 and survives as tag `archive/claude/radar-testing-state-88vt2t`.) Branches deleted in that
 cleanup are cited below as their `archive/<name>` tags. For the current tip, trust `git log`, not this line.
 
-**Latest work (2026-10-09), start here:** item 246 (merged Trung's exact
-`ns-bosch-radar-testing` tip, including the complete Jetlink port). Then item 225
+**Latest work (2026-10-09), start here:** item 249 (synced Trung through
+`e57eecf4e0`, adding the two coast-resume smoothers and coast wheel color; audited the
+existing Jetlink UI surfaces). Then item 246 (merged Trung's complete Jetlink port). Then item 225
 (radar: why the lead goes camera-only; the far-range D-057 re-anchor lockout from
 range-scaled `RANGE_SIGMA_RAW`; relaxing the sigma test alone is rejected (D-089),
 closed-loop replay on 6 routes: camera-checked recovery +34 s radar lead on 2f5 with no
@@ -11333,3 +11334,29 @@ braking is untouched. Closed-loop replay, 17 min on 8 routes, 41 coast ends: 4 s
 to +0.15 1.1 -> 1.6 s, cycles 18 -> 18, min gap/follow 0.46 -> 0.50, mean speed -0.07 m/s. The biggest 1 s rise barely
 moved (p90 0.82 -> 0.79): that is the coast -> gas step, which D-108 ramps in the carcontroller (not in this replay).
 Unit tests: 2 new in test_brake_onset.py (41 passed).
+
+## 249. Trung sync through `e57eecf4e036a82251c09bf4e57fe8061aec84d4`; Jetlink UI enablement audited (2026-10-09). Static/unit-test only; not driven.
+
+`[CONFIRMED by git fetch and merge]` Merge commit
+`78207e8acf74801b3c9d9c770e89f0032f36fb2b` incorporates the exact fetched tip of
+`trung791997/openpilot:ns-bosch-radar-testing` without rebasing. The four new commits add
+the D-108 Honda gas-resume ramp, the D-109 planner coast-resume cap, and blue coast-state
+steering-wheel feedback; none changes the Jetlink port. Their colliding source-ledger names
+were remapped from D-097/D-098 and STATUS 233/234 to D-108/D-109 and STATUS 247/248.
+
+`[CONFIRMED by static inspection]` The existing Jetlink port has the GPU/status UI: the
+home screen shows the Jetlink model/status beside the eGPU icon, and the onroad HUD shows
+green/orange/loading/crossed link state plus whether the big or small model is active. The
+comma's offroad Developer screen has the `Off`/`USB`/`iOS` selector backed by persistent
+`JetlinkLink` (default `0`, off). Galaxy has Jetlink status and big-model selection on both
+classic and mobile Model Manager surfaces. Galaxy's Developer settings layout does **not**
+contain `JetlinkLink`, however, so Galaxy cannot enable the link remotely in this tree; both
+Galaxy surfaces explicitly tell the user to turn it on in Developer settings on the comma.
+
+`[CONFIRMED against 78207e8acf]` The Honda/opendbc suite passes **428 tests**, and the
+Jetlink model-join suite passes **8 tests**. `test_brake_onset.py` and the new coast-wheel
+test cannot collect on this Apple-silicon host because the checkout carries the comma's
+aarch64 `msgq/ipc_pyx.so`. Ruff was run on all changed code and is not clean: it reports four
+findings in the Honda controller and nine in the planner/test set; no automatic cleanup was
+mixed into this sync. No route replay, live Jetlink/comma connection, real radar fusion
+timing, closed-loop vehicle response or road validation was performed here.
