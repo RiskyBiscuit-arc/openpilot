@@ -2463,3 +2463,185 @@ reaching the manager. The default remains 0 (`Off`); installing or updating the 
 not enable JetLink. A dedicated endpoint was rejected as unnecessary because the existing
 typed parameter API already provides authoritative readback and both Galaxy surfaces render
 the shared settings catalog.
+
+## D-111 — REJECTED (reverted 2026-10-10, STATUS 251): holding the gas on through a shallow dip under the gas-off line
+
+Built and shipped for a few hours (e5fc8952b), then reverted at the owner's request ("remove the existing factor rather
+than a bandaid"). The cuts it removed are not felt: route 00000313 segs 159-164 ran build 680975fef (no D-107..D-109),
+51 gas cuts, the gas just before a cut was a median 10 units (p90 45, of 750), and aEgo over the 36 short cuts moved
+-0.004 -> +0.066 -> -0.005 (1 s before / during / after), noise-sized. 29 of 49 cuts were the planner asking +0.00..+0.24
+toward the set speed on a slight downhill whose hill term cancelled it; the gas-off line on force (accel + wind + hill
+> 0, nrdr gas learner port e7d2e193f) is physically right there, since uphill a cmd of -0.3 still needs gas. The nausea
+on 313 is a slower speed swing, not the gas flicker; its cause is still open.
+
+## D-112 — StockBrakeFeel no longer coasts: the lead coast (D-102), ease coast (D-103) and coast resume cap (D-109) are removed (STATUS 252, 2026-10-10, replay only, not driven)
+
+**Problem (owner, 2026-10-10):** a 5-10 s speed swing that causes nausea on route 00000313, worst at segs 177-179 with
+StockBrakeFeel on. Asked to remove the factor, not to add a bandaid.
+
+**Cause:** the coasts. The lead coast entered at 0.5 m/s closing inside 2x the follow distance once a 0.07 m/s^2
+easing would do, then coasted at the fixed coast rate (-0.33..-0.5, about 5x the need) until the closing ended. The car
+overshot, fell behind, the planner caught up, and the coast fired again. The ease coast (D-103) did the same for gentle
+planner easing and took over whenever the lead coast was removed alone. Same-traffic closed-loop replay of the whole of
+313 (189 segs, 242 windows, 157 min; fidelity car vs log corr 0.99, speed RMSE median 0.11 m/s), 0.08-0.25 Hz accel rms:
+StockBrakeFeel off 0.105, on 0.141, on without the lead coast 0.122, without the ease coast 0.141, without both 0.100.
+Without both, brake time below -0.45 is 415 s (on 664, off 542) and mean speed matches off (on was 0.27 m/s slower).
+Removing the D-086 cap, the D-080 newborn bound or STOP_EASE alone changed nothing (0.141-0.143). Whether the lead coast
+switched on and off often did not matter (corr -0.02 with the extra swing); the swing came from every coast cycle.
+
+**Decision:** delete them, planner and car side: `lead_coast_wanted`, `lead_coast_ceiling`, `lead_coast_gas_off`,
+`ease_coast_gas_off`, `coast_resume_cap` and their constants (`LEAD_COAST_MIN` stays as the starpilot set-speed easing
+floor); controlsd no longer sets `actuators.coast`; the Honda carcontroller's `honda_bosch_lead_coast` path is gone.
+`longitudinalPlan.leadCoast` is renamed `leadCoastDEPRECATED` and never set. The rest of StockBrakeFeel stays.
+
+**Cost, seen in replay:** the five most recent other routes (298, 305, 308, 311, 312; 23 windows, 15 min, fidelity
+0.95) are neutral, swing 0.171 against on 0.179 and off 0.174. One window got worse: 312b 806 s, a cut-in at 47 m with
+a bad first speed reading (lead 33.7 -> 18 -> 27 m/s within 1 s). With the coasts the car had already dropped back to
+76 m; without them it is at 47 m like StockBrakeFeel off, and the D-086 cap holds the brake to -0.9 for 0.3 s, then steps
+to -2.2..-2.8 (sim accel -3.2 against -2.3 off). That is D-086's delayed-then-deeper brake, which the coasts used to
+hide; removing the cap alone in that window gives exactly the off result. This is the D-109 objection (312b 806.3 s
+-1.30 -> -1.82..-2.73) and it is real, but it belongs to D-086, not to the coasts. On 313, the removal brakes deeper
+than off by more than 0.3 m/s^2 in 4 of 242 windows and shallower in 6. The light brake taps with brake lights that
+D-102/D-103 hid (route 2f8, route 300) come back, the same as StockBrakeFeel off.
+
+## D-113 — A far railed lead the camera sees at about ego speed is bounded by its own fresh ranges, and the D-107 range veto reads fresh ranges while coasted, lift-only (STATUS 253, 2026-10-10, replay only, not driven)
+
+**Problem (owner, 2026-10-10):** phantom brakes on route 00000313: 38:45.7 (-1.94, track 47), 54:46.1 (-1.79,
+track 16), 81:15.5 (-2.32, track 20), and 312 23:33 (-2.14, track 23). In each, a far Bosch-A track (68-97 m) is born
+or coasted with U11 vRel on the -11..-12 rail. Its own ranges are flat or opening, and the camera sees a lead at about
+ego speed.
+
+**Cause:** D-107 bounds a railed far lead only when the camera's range matches the radar's within max(8 m, 8%). At 54:51
+the camera read 100-107 m against radar 87-92 m, so D-107 dropped after 0.5 s and the rail stood for 1.5 s. At 312 23:33
+the D-107 range veto read `vRelRangeDerived`, which only updates on a measured sweep and so sat frozen at -2.80 through
+the coast while the fresh ranges opened 80.6 -> 88.1 m. When the camera floor rose past -2.80, the frozen value vetoed
+the bound.
+
+**Decision:** two changes in `far_rail_vrel_floor`.
+- `FAR_RAIL_WIDE_MATCH`: when the strict match fails, a camera within 25 % on 12 of 20 frames, steady (stdev <= 2) and
+  not closing by more than YOUNG_TRACK_VISION_MAX_CLOSING may allow a bound. The bound comes from the track's own
+  ranges (`Track.recent_range_hist`, fresh liveTracks sweeps over the last 1.5 s, coasted sweeps included). It uses the
+  young-track flat-range fit and is never less closing than the camera floor. With no usable fit there is no bound.
+- `FAR_RAIL_COASTED_OWN_RANGE_VETO`: while the lead is coasted, a range veto from the frozen `vRelRangeDerived` is
+  lifted when the fresh-range fit is above the floor. **Lift-only:** the fresh fit never adds a veto D-107 did not have.
+  The first version replaced the frozen value outright. At 312 13:34 (813.9 s), track 62 had no `vRelRangeDerived`
+  (NaN) while its range converged 66 -> 54 m onto the camera's 52 m. Read as a -11 m/s fit, that removed D-107's
+  -3.6 bound and braked -1.67 (shipped -1.45, later). The same happened for 3 ticks at 312 23:32.
+
+**Evidence (replay; radard + planner open loop from the logs, radard seeded with vEgo history):** 17 groups (313
+segs 38, 54, 81, 111, 115, 158; 297a/b, 298, 2a6, 2f2, 305, 308, 311, 312a/b/c). Fidelity, D-113 off against the car
+command: corr 0.83-0.999 (298 0.27, an older build). Only four events change, and every tick where D-113 changes what
+radard publishes is shallower:
+
+| Event | Shipped | D-113 | Car |
+|---|---|---|---|
+| 313 38:50 | -1.91 | -1.14 | -1.94 |
+| 313 54:51 | -1.77 | -0.60 | -1.79 |
+| 313 81:25 | -1.37 | -0.47 | -2.32 |
+| 312 23:33 | -1.57 | -1.00 | -2.14 |
+
+The only deeper ticks (-0.11 at 38:53, -0.16 at 81:27.8) have identical radar input. They are the planner easing a little
+longer from the higher speed it kept. 312b 806 (the D-086 cut-in) and 13:34 are unchanged. D-113 only adds a bound
+where shipped code published the rail, so it cannot make D-086's delayed-then-deeper brake worse. A bound that releases
+later has the same shape as any D-107 release, and in 38:50 the release lands at -1.14 against -1.91. A stopped or slow
+car keeps the rail: its range closes, so the fit floor is at or below the rail.
+
+**Protected real-brake routes (testing agent, replay only, D-113 on vs off):**
+- 17 events on 232 (both 00000232 routes), 236, 237 (two), 25b, 25e (two), 25f, 263 (two), 266 (three), 268, 26f,
+  1e8 and 2ae trk39. 16 have the same minimum and no differing tick in the window.
+- Fidelity, off against the car command: corr 0.86-0.98 on most events. It is weak on 263 (0.37 and 0.62), 26f
+  (-0.16), 2ae (0.41), 25f (0.77) and 266 (0.77-0.79).
+- **The exception is 263 5:58.6:** min -1.61 on against -1.70 off (car -1.48), and on is up to +1.49 shallower at
+  5:59.6. It is the case D-113 is for, not a bug:
+  - Track 25 is leadOne throughout, at 78-88 m and vEgo 22, so headway is 3.5 s or more. The camera has it within 25%
+    at about 20.6 m/s. The raw vRel is railed at -12.00 and coasted from 5:57.9 to 5:59.8.
+  - The range bottoms out at 77.9 m (5:59.0) and then opens to 87.4 m (6:00.5). `vRelRangeDerived` is frozen at -4.26
+    the whole time.
+  - The own-range fit goes -13.3, -9.2, -6.1, -3.4, 0.0, then +3.2. The floor follows it from below: the first lift is
+    at 5:58.58 (-11.44), then -8.13, then -3.88. It is never above the fit.
+  - Off keeps -12.00 for about 0.9 s while the range opens and plans -1.70. On plans -1.32, -0.57, then -0.20.
+  - FAR_RAIL_WIDE_MATCH alone makes the whole window difference. The coasted-veto flag only adds the tail after
+    6:01, where radard's output is identical and the 0.1-0.24 differences are carried-over MPC state.
+  - 263 6:12-6:16 is not railed: the floor is None on both sides and the results match tick for tick.
+
+Not road-validated.
+
+## D-114 — A lead track that slides onto a slower car in the next lane is floored at the camera lead's speed (STATUS 254, 2026-10-10, replay only, not driven)
+
+**Problem (owner, 2026-10-10):** route 00000311 41:34 (log ~2492-2497 s) braked hard with no reason. The video shows a
+dark SUV fully in the left lane; the in-lane cars stay about 70 m ahead.
+
+**Cause:** Bosch-A track 27 was on the in-lane lead at 72 m / 21 m/s, then slid onto the SUV: range 72 -> 46 m and vLead
+21 -> 5.6 m/s in 1.5 s, aLeadK -9.8. Its lateral stayed +0.3..+0.7, inside the lane band, so no lateral or rail gate
+applied. There was no separate track on the SUV. The camera lead also picked the SUV (y -0.2, prob 0.99) but held it at
+13-14 m/s. The planner braked on leadTwo, which carried the same track. Plan -3.17, replay sim -3.89.
+311 2490.0 had been listed as a protected real brake in D-107 / STATUS 232; it is this phantom and is reclassified.
+
+**Decision:** `SLIDE_BOUND` (radard.py, class `SlideBound`, Bosch-A only, default ON). Enter when leadOne is a radar
+track at d >= 20 m and, together:
+- its vLead fell faster than `SLIDE_DECEL` (8 m/s²) over ~0.75 s on the same track id;
+- the camera lead is at the same range (within max(10 m, 20 %)), prob > 0.9 for 1 s, accel > -1.5, ego-referenced
+  speed stdev < 1.5 over 1 s and 2 s trend flatter than -`SLIDE_CAM_SLOPE` (1.0 m/s²);
+- the camera is at least `SLIDE_MIN_GAP` (3 m/s) faster than vLead.
+Then vLead / vLeadK / vRel are raised to camera speed - `SLIDE_MARGIN` (1.0) and aLeadK to min(camera accel, 0) -
+`SLIDE_A_MARGIN` (0.5), on leadOne and on leadTwo / leadOnpath when they carry the same track. The latch holds up to
+`SLIDE_HOLD_S` (4 s) while the camera still sees the same object (prob, accel, range), without re-checking the decel.
+Lift-only, nothing deleted or coasted (D-041/D-042).
+
+**Why not more:** both sensors put the SUV in our lane. The remaining brake is the camera's own 13 m/s in-lane lead.
+Removing it needs a lateral signal neither sensor gives here. Zero margins (0 / 0) took 41:34 to plan -1.30 but softened
+the real brake at 311 84:20 by +0.68, so they were rejected.
+
+**Rejected signature:** range-slope vs vLead disagreement (too noisy, see the earlier refutation). The decel signature
+over 299/311/312 hits 311 41:33, 74:11, 78:54; 312 seg32, seg48; and 299 seg49 4137.2, a real slowing lead the camera
+lagged on (camera trend -1.4..-1.9). `SLIDE_CAM_SLOPE` blocks that one.
+
+**Evidence (replay, car-matched, D-113 and the coast-window change on in all arms):**
+
+| Event | today | D-114 | car |
+|---|---|---|---|
+| 311 41:34 plan min | -3.17 | -1.59 | - |
+| 311 41:34 sim accel min (closed loop) | -3.89 | -2.45 | - |
+| 313 116:00 (radar glitch) | -1.61 | -1.31 | - |
+| 312 23:32 (radar glitch) | -1.00 | +0.02 | - |
+| 312 13:33-37 (real closer lead) | -1.45 | -1.22 | - |
+
+At 312 13:33 the bound held 4.6 s and trimmed vRel to the camera's; one tick was 0.15 deeper. Testing agent (Job),
+independent replay: 41:34 plan -3.23 -> -1.64, sim -3.94 -> -2.47, fidelity corr 0.996. Real brakes 311 s9/s46/s72/s84
+and 299 s49 unchanged. 312 s32 max +0.06; 312 s48 sim -0.27 deeper. Protected 232/236/237/25b/25e/25f/263/266/268/26f/
+1e8/2ae unchanged except 266a (29 ticks shallower, 3 deeper, min -2.00 unchanged).
+
+**Lever:** `SLIDE_BOUND = False` restores the previous behaviour exactly.
+
+## D-115 — StockBrakeFeel runs only with the Bosch-A radar on; its description drops the removed coasts (STATUS 255, 2026-10-10, static only, not driven)
+
+**Owner, 2026-10-10:** vision-only ACC should rely fully on the current planner, without StockBrakeFeel on top, and the
+toggle text should reflect that it no longer coasts (D-112).
+
+**Decision:** `toggle.stock_brake_feel` is true only when Advanced Longitudinal Tune and StockBrakeFeel are on **and** the
+car is a Honda Bosch-A platform with the radar enabled (`not CP.radarUnavailable`, i.e. BoschARadar on). With the
+radar off, the param keeps its stored value but does nothing. The device UI shows the toggle inside the Bosch A Radar
+section, only while BoschARadar is on; the Galaxy layout hides it with `visible_when_all_true: [BoschARadar]`. The
+description says it matches stock Bosch-A ACC with light brake taps (the D-086 depth/onset law by TTC), plus STOP_EASE
+and the D-080 newborn-lead bound; owner asked that it not be worded as "no longer coasts".
+
+## D-116 — A long Bosch-A coast is bounded by its last 1.0 s of ranges, not the whole coast (STATUS 256, 2026-10-10, replay only, not driven)
+
+**Problem (owner, 2026-10-10):** route 00000311 84:21, a late, firmer brake (car -1.60) for a lead at ~100 m.
+
+**Cause:** track 33 had a +2.6 m range jump, so D-062 coasted its -1.5 vRel. Every later sweep was degraded (far range
+sigma), so D-062 never re-rooted and the coast ran 14 s (211 sweeps). The STATUS 111 coast bound fits
+`inconsistent_run`, which by then held the whole coast; the old near-steady ranges dragged the fit to -0.9..-4.8 while
+U11 read -4..-7.7 and the last 1 s of range -5..-11. The lead was closing ~8 m/s while radard published ~-1.5.
+
+**Decision:** `BOSCH_A_COAST_FIT_WINDOW_S = 1.0`: the coast bound fits only the trailing 1.0 s of `inconsistent_run`
+(4x the D-043 minimum span). Unchanged: the bound is one-sided (more closing only) outside a rail hold, the rejoin
+fit still comes first, and nothing is deleted (D-041/D-042). `0` restores the whole-run fit.
+
+**Evidence (closed-loop replay, car-matched):** 84:21 sim -1.77 -> -1.44 (car -1.60), braking starts ~3 s earlier, min
+time to contact 4.9 -> 7.0 s, fidelity v RMSE 0.33, cmd corr 0.975. The shipped constant replays tick-identically to
+the tested env arm. Testing agent (Job), COASTWIN-only A/B, 23 windows incl. the protected real brakes
+(232/236/237/25e/263/266/268/26f/1e8/2ae, 311 s9/s41/s46/s72, 299 s49, 312 s32/s48): 21 identical; 25b and 25f within
+0.01. In 311 s84 the only other change is 86:35, sim accel -4.27 -> -4.38: radard's leadOne is identical in both arms
+there (154 differing ticks, all vRel, all in 84:13-84:21); the difference is the sim car's state carried over from
+84:21 (+0.03 m/s, -0.5 m gap).

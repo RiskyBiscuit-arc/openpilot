@@ -1,6 +1,6 @@
 # Status
 
-**As of: 2026-10-09**
+**As of: 2026-10-10**
 
 Update the date above whenever this file changes. If it is stale, trust `git log` over this
 file.
@@ -11,8 +11,9 @@ Repo: StarPilot / openpilot fork `openpilot-radar`. Working branch
 2026-09-30 and survives as tag `archive/claude/radar-testing-state-88vt2t`.) Branches deleted in that
 cleanup are cited below as their `archive/<name>` tags. For the current tip, trust `git log`, not this line.
 
-**Latest work (2026-10-09), start here:** item 250 (added the missing offroad-only
-Galaxy JetLink mode selector). Then item 249 (synced Trung through
+**Latest work (2026-10-10), start here:** items 251-256 (Trung's radar and longitudinal
+updates through `5c8eebabf9`; replay/static evidence only, not driven). Then item 250
+(added the missing offroad-only Galaxy JetLink mode selector). Then item 249 (synced Trung through
 `e57eecf4e0`, adding the two coast-resume smoothers and coast wheel color; audited the
 existing Jetlink UI surfaces). Then item 246 (merged Trung's complete Jetlink port). Then item 225
 (radar: why the lead goes camera-only; the far-range D-057 re-anchor lockout from
@@ -11382,3 +11383,95 @@ they were not mechanically rewritten as part of this control. The Galaxy test st
 extended for current Honda and Panda imports so the parameter API suite can collect on this
 Apple-silicon host without loading the checked-in aarch64 device artifacts. No live Galaxy
 browser, comma, Mac JetLink host, model handoff, route replay, or road validation was run.
+
+## 251. D-111 gas-off hold reverted. Log analysis only.
+
+The hold cut route 313's gas flicker (70 -> 35 cuts in replay) but the flicker is not felt: median 10 gas units before a
+cut, aEgo through the short cuts within noise (-0.004 / +0.066 / -0.005 m/s^2). Reverted for the root cause (D-111).
+
+## 252. StockBrakeFeel lead coast and ease coast removed (D-112). Replay + static only, not driven.
+
+Owner reported a 5-10 s speed swing (nausea) on route 00000313. Same-traffic closed-loop replay over the whole drive
+(242 windows, 2.6 h; fidelity car-vs-log: swing corr 0.99, v RMSE median 0.11 m/s) put it on StockBrakeFeel's coasts:
+the D-102 lead coast capped the target at a full coast (-0.33..-0.5) for a need of ~0.07 and held it until the closing
+ended, so the car fell back and caught up again; with it removed alone, the D-103 ease coast took its place.
+
+| 313 whole drive (aEgo 0.08-0.25 Hz band RMS) | swing | brake (<-0.45) s | min gap/follow p10 |
+|---|---|---|---|
+| SBF off | 0.105 | 542 | 0.54 |
+| SBF on, with coasts | 0.141 | 664 | 0.58 |
+| SBF on, D-112 build (rsw_v100) | 0.100 | 415 | 0.54 |
+
+Leave-one-out: removing D-086 cap, D-080 newborn bound or stop ease alone changes nothing (0.141). 5 recent routes (298,
+305, 308, 311, 312; 23 windows, 898 s, fidelity 0.95): 0.171 vs on 0.179 / off 0.174, brake 164 / 172 / 169 s. One
+window worse: 312 13:26 cut-in at 47 m with a bad first lead speed brakes to -3.2 (off -2.3); isolated to the D-086
+cap (delayed then deeper), which the coasts hid by keeping a larger gap. Open, not changed here.
+
+Logs (313): gas, gas-off and brake deliver the same decel per command bin and switch equally smoothly; light slowing
+(to about -0.3) is already gas easing, firmer is a light brake, as stock does. Brake lights on 10.0 % of the time
+(SBF off 10.4, old SBF 3.9); short taps 1.5 / 10 min in all three.
+
+Removed: lead coast, ease coast, coast_resume_cap (D-109), carcontroller lead-coast gas-off and `actuators.coast` from
+controlsd; `leadCoast` -> `leadCoastDEPRECATED`. Kept: D-086 cap, D-080, stop ease, D-108 gas ramp. Tests: 26 coast
+tests removed; the remaining failures (5 lead_geometry, 4 import errors) are the same on the base. Lint: no new errors.
+
+## 253. Far railed lead: own-range bound when the camera roughly agrees, coasted range veto lift-only (D-113). Replay + static only, not driven.
+
+Phantom brakes on 313 (38:45.7, 54:46.1, 81:15.5) and 312 23:33 came from a far Bosch-A track on the U11 -12 rail
+whose own ranges were flat or opening while the camera saw a lead at ego speed. D-107 missed them: the camera range was
+outside its 8 % match, or the range veto read a `vRelRangeDerived` frozen through the coast.
+
+| Event | shipped | D-113 | car |
+|---|---|---|---|
+| 313 38:50 | -1.91 | -1.14 | -1.94 |
+| 313 54:51 | -1.77 | -0.60 | -1.79 |
+| 313 81:25 | -1.37 | -0.47 | -2.32 |
+| 312 23:33 | -1.57 | -1.00 | -2.14 |
+
+17 replay groups, fidelity (shipped vs car command) corr 0.83-0.999 (298 0.27, older build). Other groups are unchanged,
+including 312 13:26 (D-086 cut-in) and 312 13:34. The coasted veto is lift-only: the first version removed a D-107
+bound at 312 13:34 (range converging onto the camera read as -11 m/s) and braked -1.67 against shipped -1.45.
+
+Replay tool fix: radard's `v_ego_hist` must be seeded with vEgo before the first update. Cold, the first track gets
+vLead = vRel, which made a -3.5 phantom in replay at 313 81:17 that never happened on the car.
+
+Tests: 12 new in `test_range_vrel_assist.py`, 181 pass. Lint: no new errors. Protected real-brake routes:
+- 17 events were replayed by the testing agent. 16 are identical on and off.
+- On 263 at 5:58.6, D-113 brakes up to 1.49 m/s² less (min -1.61 against -1.70; the car was -1.48).
+- At that point the lead is railed at -12 and coasted, at 78 m (3.5 s). The range opened from 77.9 m to 87.4 m, and the
+  bound stays at or below the range fit.
+- Replay fidelity is weak there (corr 0.37). See D-113.
+
+## 254. A lead track that slides onto a slower next-lane car is floored at the camera lead's speed (D-114). Replay + static only, not driven.
+
+311 41:34 braked hard for a dark SUV fully in the left lane. Radar track 27 slid from the in-lane lead at 72 m onto the
+SUV and read 21 -> 5.6 m/s in 1.5 s. The camera lead held the same object at 13-14 m/s. The lead's speed is now floored
+at camera speed - 1.0 (accel at camera - 0.5) on every lead slot carrying that track, latched up to 4 s.
+
+| replay | today | D-114 |
+|---|---|---|
+| 311 41:34 plan min | -3.17 | -1.59 |
+| 311 41:34 sim accel min | -3.89 | -2.45 |
+
+The rest of that brake is the camera's own 13 m/s in-lane lead and cannot be removed without lateral evidence. 311 2490.0
+was listed as a protected real brake in STATUS 232; it is this phantom.
+
+17 replay groups: only 41:34, 313 116:00 (-1.61 -> -1.31), 312 23:32 (-1.00 -> +0.02) and 312 13:33 (-1.45 -> -1.22,
+one tick 0.15 deeper) change. Testing agent: real brakes 311 s9/s46/s72/s84 and 299 s49 unchanged; protected routes
+unchanged except 266a (min unchanged); zero margins rejected (softened 311 84:20 by +0.68). The shipped constants replay
+tick-identically to the tested env-gated version on all 17 groups. Fidelity at 41:34: corr 0.996, v RMSE 0.21-0.25.
+
+Tests: 7 new in `test_radard_slide_bound.py`; radard/lead tests 310 pass. Lint clean. Not road-validated.
+
+## 255. Stock Brake Feel is Bosch-A radar only; description updated (D-115). Static only, not driven.
+
+With BoschARadar off (vision-only ACC) StockBrakeFeel has no effect and the planner drives alone. The device toggle
+moved into the Bosch A Radar section, shown only while the radar is on; Galaxy hides it the same way. Its text now
+reads as matching stock Bosch-A ACC with light brake taps; the coasts removed in D-112 are no longer described. Layout/brake-onset tests 53 pass; lint unchanged from base.
+
+## 256. A long Bosch-A coast is bounded by its last 1.0 s of ranges (D-116). Replay + static only, not driven.
+
+311 84:21: track 33 coasted -1.5 m/s for 14 s while its range closed ~8 m/s; the coast bound averaged the whole coast
+and lagged. It now fits the last 1.0 s. Closed-loop replay: -1.77 -> -1.44 (car -1.60), braking ~3 s earlier, min TTC
+4.9 -> 7.0 s. Testing agent: 21 of 23 windows identical, 2 within 0.01; 311 86:35 sim -4.27 -> -4.38 is sim carry-over
+with identical radar input. Tests: 3 new in `test_bosch_a_coast_fit_window.py`; Bosch-A radar tests 175 pass. Lint clean.

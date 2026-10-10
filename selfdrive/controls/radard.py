@@ -233,6 +233,30 @@ BIRTH_RAIL_LOW_VISION_Y_TOL_M = 2.0
 BIRTH_RAIL_LOW_VISION_MARGIN_MPS = 4.0
 
 
+# D-114 SLIDE_BOUND: a Bosch-A lead track that slides onto a slower car in the next lane reads it as the lead braking hard.
+# Route 311 41:34 (video: dark SUV in the LEFT lane the whole time): track 27 held the in-lane lead at 72 m / 21 m/s,
+# then its range ran 72 -> 46 m and vLead 21 -> 5.6 m/s in 1.5 s (aLeadK -9.8) while the camera lead held 13-14 m/s
+# (prob 0.99). The track's lateral never left the lane band, so no rail/lateral gate saw it; the plan asked -3.17.
+# Rule: when the lead's vLead falls faster than SLIDE_DECEL over ~0.75 s on the same track while a
+# confident camera lead at the same range (prob > 0.9 for 1 s, ego-referenced speed sd < 1.5, 2 s speed trend flatter
+# than -SLIDE_CAM_SLOPE, accel > -1.5) is >= 3 m/s faster, vLead/vRel/vLeadK are floored at camera speed - SLIDE_MARGIN
+# and aLeadK at min(camera accel, 0) - SLIDE_A_MARGIN, on every lead slot carrying that track (the planner braked on
+# leadTwo, the same track). Latched up to SLIDE_HOLD_S while the camera still sees the same object. Nothing is deleted.
+# Replay (car-matched, closed-loop fitted plant): 41:34 plan -3.17 -> -1.59, sim -3.89 -> -2.45. The rest is the
+# camera's own in-lane 13 m/s lead; both sensors put the SUV in our lane, so it cannot be removed here.
+# Margins: SLIDE_MARGIN 0 / A_MARGIN 0 softened real brake 311 84:20 by +0.68 (2026-10-10 replay); 1.0 / 0.5 left the
+# real brakes (311 s9/s46/s72/s84, 299 s49) and the protected set (232..2ae) unchanged except 266a (min unchanged).
+# SLIDE_CAM_SLOPE: the one real slowing lead the decel test met (299 seg 49) had a camera trend of -1.4..-1.9 m/s^2.
+# Decel-signature hits over 299/311/312: 311 41:33, 74:11, 78:54; 312 seg32, seg48; 299 seg49 (real, blocked by slope).
+SLIDE_BOUND = True
+SLIDE_DECEL = 8.0
+SLIDE_MARGIN = 1.0
+SLIDE_A_MARGIN = 0.5
+SLIDE_CAM_SLOPE = 1.0
+SLIDE_HOLD_S = 4.0
+SLIDE_MIN_GAP = 3.0
+SLIDE_MIN_D = 20.0
+
 def birth_rail_vision_agrees(d_rel: float, y_rel: float, vision_lead: tuple[float, float, float, float] | None) -> bool:
   """D-077 LOW moving test: a confident model lead at the track's range and lateral offset, moving >= MIN_LEAD."""
   if vision_lead is None:
@@ -657,7 +681,7 @@ ONPATH_ADOPT_MIN_MEDIAN_EXISTENCE = 0.2
 # Replay (car-matched 07b66420, params 2026-09-30T16:44:42Z, fitted plant): 298 BM3 sim accel -1.20 -> -0.58; 283
 # 881.5, 23e 2342.9, 297 525.6, 263 358, 266 484, 266 560 identical to base. Does not touch the 0.2 s leadOnpath step
 # at 298 1018.35 (25 m). Replay evidence only; not road-validated.
-# D-096 (route 00000312): newly adopted tracks held vRel flat at -12.0, -11.1 (raw 65, one count off the rail) or
+# D-107 (route 00000312): newly adopted tracks held vRel flat at -12.0, -11.1 (raw 65, one count off the rail) or
 # lower for 0.6-1.7 s while the range was flat or opening, at 63-80 m; the bound missed them on the exact-rail test
 # and the 80 m minimum. "Railed" now means within FAR_RAIL_NEAR_RAIL_MARGIN_MPS of the rail (the same 1.0 m/s as
 # ONPATH_ADOPT_RAIL_VREL_MARGIN_MPS) and the minimum is FAR_RAIL_MIN_D_REL_M = 50 m. The range veto and the
@@ -673,6 +697,34 @@ FAR_RAIL_RANGE_TOL_M = 8.0
 FAR_RAIL_RANGE_TOL_FRAC = 0.08
 FAR_RAIL_MAX_SPEED_STDEV_MPS = 2.0
 FAR_RAIL_MARGIN_MPS = 3.0
+# D-113 (route 00000313, Peter's bookmarks 54:49.2 and 81:25.6): far newborn tracks held the -12.0 rail coasted for
+# 1.5-2.7 s while their own range was flat or opening, and the camera had a car near that range at ego speed. D-107
+# bounded them only on the frames whose camera range sat within 8% of the radar's: at 90-115 m the camera read
+# 7-20% long (54:51 track 16: radar 87-92 m, camera 100-107 m), the matches fell to 6-10 of 20 and the rail came back.
+# 54:51.2 still braked to -1.77 in replay (car -1.79). When the strict match fails, a WIDE match may still bound:
+# camera range within FAR_RAIL_WIDE_RANGE_TOL_FRAC of dRel (the 25% of RANGE_VREL_OFF_RAIL_CAM_RANGE_TOL, which
+# measured the camera 16-20% off at 50 m on 2f5) on FAR_RAIL_MIN_MATCHES frames with steady speed, the camera NOT
+# closing (median v >= vEgo - YOUNG_TRACK_VISION_MAX_CLOSING), and the track's OWN fresh ranges (coasted sweeps
+# included: a coast holds vRel, not the range) over the last FAR_RAIL_RANGE_WINDOW_S fitting a line within
+# YOUNG_TRACK_NOISY_MAX_RESIDUAL_M. The floor is then the young-track flat-range floor of that fit (slope -
+# YOUNG_TRACK_FLAT_MARGIN, minus YOUNG_TRACK_NOISY_SE_K standard errors when rms > YOUNG_TRACK_MAX_RESIDUAL_M), and never
+# less closing than the camera floor: the radar's own range carries the bound, the camera only allows it. A stopped
+# or slow car keeps the rail: its range closes, so its floor is at or below the rail and nothing moves; a camera
+# that says closing (266 795.4, 237 1188.2, the YOUNG_TRACK_VISION_GATE cases) never bounds. The range veto and the
+# NEWBORN exemption are unchanged. Replay evidence only; not road-validated.
+FAR_RAIL_WIDE_MATCH = True
+FAR_RAIL_WIDE_RANGE_TOL_FRAC = 0.25
+FAR_RAIL_RANGE_WINDOW_S = 1.5
+# D-113, same evidence: the D-107 range veto read vRelRangeDerived, which only updates on a MEASURED sweep and so sits
+# frozen through a coast. 312 23:33 (1413.1) track 23 coasted with it frozen at -2.80 while its fresh ranges opened
+# 80.6 -> 88.1 m (+2.5 m/s); once the camera floor rose past -2.80 the frozen value vetoed the bound and the -11.1 rail
+# came back (replay -1.57, car -2.14). While the lead is coasted (measuredRadar False) and its own fresh ranges fit,
+# the veto reads that fit's slope instead; with no usable fit it keeps vRelRangeDerived. A real rail approach keeps
+# the veto either way: its fresh ranges close too (266 484, 311 2490.0). Lift-only: the fresh fit can clear a veto
+# the frozen value made, never make one D-107 did not. 312 13:34 (813.9) track 62 had no vRelRangeDerived (NaN, so
+# no D-107 veto) while its range converged 66 -> 54 m onto the camera's 52 m; read as a -11 m/s fit, that removed
+# the -3.6 bound and braked -1.67 (shipped -1.45 later). Replay evidence only; not road-validated.
+FAR_RAIL_COASTED_OWN_RANGE_VETO = True
 
 # D-089 (STATUS 225; replay only, not driven): a Bosch-A point re-admitted by the range-scaled far-range re-anchor
 # (RadarPoint.recovered, see BOSCH_A_REANCHOR_RECOVER_SIGMA_FRAC) may be a lead, adjacent or onpath candidate only after
@@ -863,19 +915,62 @@ def far_rail_model_sample(vis) -> tuple[float, float, float] | None:
   return float(vis.prob), float(vis.x[0]) - RADAR_TO_CAMERA, float(vis.v[0])
 
 
-def far_rail_vrel_floor(lead, hist, v_ego: float) -> float | None:
-  """FAR_RAIL_VISION_BOUND: the least vRel a far railed Bosch-A radar lead may publish, or None when it does not apply."""
+def own_range_fit(range_hist) -> tuple[float, float] | None:
+  """D-113: (slope, young-track flat-range floor) of a track's recent fresh ranges [(t, dRel)], or None without a usable fit."""
+  if len(range_hist) < YOUNG_TRACK_MIN_SAMPLES:
+    return None
+  a = np.array(range_hist, dtype=np.float64)
+  ts = a[:, 0] - a[-1, 0]
+  if ts[-1] - ts[0] < YOUNG_TRACK_MIN_SPAN_S:
+    return None
+  slope, icpt = np.polyfit(ts, a[:, 1], 1)
+  resid = a[:, 1] - (icpt + slope * ts)
+  rms = float(np.sqrt((resid ** 2).mean()))
+  if rms > YOUNG_TRACK_NOISY_MAX_RESIDUAL_M:
+    return None
+  floor = float(slope) - YOUNG_TRACK_FLAT_MARGIN
+  if rms > YOUNG_TRACK_MAX_RESIDUAL_M:
+    floor -= YOUNG_TRACK_NOISY_SE_K * float(np.sqrt((resid ** 2).sum() / (len(ts) - 2) / ((ts - ts.mean()) ** 2).sum()))
+  return float(slope), floor
+
+
+def own_range_vrel_floor(range_hist) -> float | None:
+  """D-113: the young-track flat-range floor of a track's recent fresh ranges, or None without a usable fit."""
+  fit = own_range_fit(range_hist)
+  return None if fit is None else fit[1]
+
+
+def far_rail_vrel_floor(lead, hist, v_ego: float, range_hist=None) -> float | None:
+  """FAR_RAIL_VISION_BOUND: the least vRel a far railed Bosch-A radar lead may publish, or None when it does not apply.
+  range_hist: the track's recent fresh ranges, for the D-113 wide match (None turns it off)."""
   if not (lead.status and lead.radar and lead.dRel >= FAR_RAIL_MIN_D_REL_M and
           lead.vRel <= BOSCH_A_U11_LOW_RAIL_MPS + FAR_RAIL_NEAR_RAIL_MARGIN_MPS):
     return None
   tol = max(FAR_RAIL_RANGE_TOL_M, FAR_RAIL_RANGE_TOL_FRAC * lead.dRel)
   speeds = [h[2] for h in hist if h is not None and h[0] >= FAR_RAIL_VISION_MIN_PROB and abs(h[1] - lead.dRel) <= tol]
-  if len(speeds) < FAR_RAIL_MIN_MATCHES or float(np.std(speeds)) > FAR_RAIL_MAX_SPEED_STDEV_MPS:
+  if len(speeds) >= FAR_RAIL_MIN_MATCHES and float(np.std(speeds)) <= FAR_RAIL_MAX_SPEED_STDEV_MPS:
+    floor = float(np.median(speeds)) - float(v_ego) - FAR_RAIL_MARGIN_MPS
+  elif FAR_RAIL_WIDE_MATCH and range_hist is not None:
+    speeds = [h[2] for h in hist if h is not None and h[0] >= FAR_RAIL_VISION_MIN_PROB and
+              abs(h[1] - lead.dRel) <= FAR_RAIL_WIDE_RANGE_TOL_FRAC * lead.dRel]
+    if len(speeds) < FAR_RAIL_MIN_MATCHES or float(np.std(speeds)) > FAR_RAIL_MAX_SPEED_STDEV_MPS or \
+       float(np.median(speeds)) < float(v_ego) - YOUNG_TRACK_VISION_MAX_CLOSING:
+      return None
+    own = own_range_vrel_floor(range_hist)
+    if own is None:
+      return None
+    floor = min(own, float(np.median(speeds)) - float(v_ego) - FAR_RAIL_MARGIN_MPS)
+  else:
     return None
-  floor = float(np.median(speeds)) - float(v_ego) - FAR_RAIL_MARGIN_MPS
   v_range = float(lead.vRelRangeDerived)
   if math.isfinite(v_range) and v_range <= floor:
-    return None  # the track's own range fit closes at least as fast: the rail stands
+    # The track's own range fit closes at least as fast: the rail stands. While coasted that fit is frozen at the
+    # last measurement, so the fresh ranges may lift the veto. They never add one: lift-only.
+    if not (FAR_RAIL_COASTED_OWN_RANGE_VETO and range_hist is not None and not getattr(lead, "measuredRadar", True)):
+      return None
+    fit = own_range_fit(range_hist)
+    if fit is None or fit[0] <= floor:
+      return None
   return floor
 
 
@@ -1026,6 +1121,8 @@ class Track:
     self._kf_follow_t = float('nan')  # time of the last NEWBORN_KF_FOLLOW_RANGE seed
     self.t_last = float('nan')  # NEWBORN_RANGE_CLOSING_EXEMPT: t_now of the latest update (the track's age)
     self.young_range_hist: list = []
+    # D-113: every fresh-sweep (t, dRel) of the last FAR_RAIL_RANGE_WINDOW_S, coasted sweeps included, at any age.
+    self.recent_range_hist: deque = deque()
     # D-077: -1 born on the low rail, +1 on the high rail, 0 not (yet); birth_rail_done ends the ramp for good.
     # birth_rail_vrel is the vRel to publish while the ramp is active, else None.
     self.birth_rail = 0
@@ -1083,6 +1180,10 @@ class Track:
       (not self.young_range_hist or float(t_now) > self.young_range_hist[-1][0])
     if young_fresh:
       self.young_range_hist.append((float(t_now), float(d_rel)))
+    if not self.recent_range_hist or float(t_now) > self.recent_range_hist[-1][0]:
+      self.recent_range_hist.append((float(t_now), float(d_rel)))
+      while float(t_now) - self.recent_range_hist[0][0] > FAR_RAIL_RANGE_WINDOW_S:
+        self.recent_range_hist.popleft()
 
     if measurement_update:
       self.vRelRangeFresh = False
@@ -1922,6 +2023,51 @@ def get_adjacent_stopped(tracks: dict[int, Track], model_data: capnp._DynamicStr
   }
 
 
+
+class SlideBound:
+  """D-114: floor a sliding lead's speed at the camera's (see SLIDE_BOUND)."""
+  def __init__(self):
+    self.hist: deque = deque(maxlen=40)  # (t, track, vLead, prob, cam_v), model cadence, 2 s
+    self.track = -1
+    self.t_latch = 0.0
+
+  def step(self, lead, others, vis, cam_v: float, t: float) -> bool:
+    trk = int(lead.radarTrackId) if lead.status and lead.radar else -1
+    self.hist.append((t, trk, float(lead.vLead), float(vis.prob), cam_v))
+    if trk < 0 or lead.dRel < SLIDE_MIN_D:
+      self.track = -1
+      return False
+    same_obj = vis.prob > 0.9 and vis.a[0] > -1.5 and abs(lead.dRel - float(vis.x[0])) < max(10.0, 0.2 * lead.dRel)
+    if self.track == trk and t - self.t_latch <= SLIDE_HOLD_S:
+      if not same_obj:
+        self.track = -1
+        return False
+    else:
+      cam1 = [x for x in self.hist if x[0] > t - 1.0]
+      cam2 = [x for x in self.hist if x[0] > t - 2.0]
+      slope = float(np.polyfit([x[0] for x in cam2], [x[4] for x in cam2], 1)[0]) if len(cam2) >= 16 else -99.0
+      old = [x for x in self.hist if t - 0.85 <= x[0] <= t - 0.65 and x[1] == trk]
+      if not (same_obj and len(cam1) >= 8 and all(x[3] > 0.9 for x in cam1) and float(np.std([x[4] for x in cam1])) < 1.5
+              and slope > -SLIDE_CAM_SLOPE and cam_v - float(lead.vLead) >= SLIDE_MIN_GAP and old
+              and (float(lead.vLead) - old[0][2]) / (t - old[0][0]) <= -SLIDE_DECEL):
+        self.track = -1
+        return False
+      self.track, self.t_latch = trk, t
+    floor = cam_v - SLIDE_MARGIN
+    a_floor = min(float(vis.a[0]), 0.0) - SLIDE_A_MARGIN
+    fired = False
+    for ld in [lead] + [o for o in others if o.status and o.radar and int(o.radarTrackId) == trk]:
+      dv = floor - float(ld.vLead)
+      if dv <= 0:
+        continue
+      ld.vLead = floor
+      ld.vLeadK = float(ld.vLeadK) + dv
+      ld.vRel = float(ld.vRel) + dv
+      ld.aLeadK = max(float(ld.aLeadK), a_floor)
+      fired = True
+    return fired
+
+
 class RadarD:
   def __init__(self, radar_ts: float = DT_MDL, delay: float = 0.0, g90_radar_filter: bool = False,
                honda_bosch_a_radar: bool = False):
@@ -1931,6 +2077,8 @@ class RadarD:
     self.honda_bosch_a_radar = honda_bosch_a_radar
     self.young_flat_bound_count = 0
     self.far_rail_bound_count = 0
+    self.slide_bound = SlideBound()
+    self.slide_bound_count = 0
     self.far_rail_hist = [deque(maxlen=FAR_RAIL_HIST_FRAMES) for _ in range(2)]  # per model lead slot
     # The lead KF consumes Bosch measurements at the physical radar cadence. Lead probability
     # filters, however, consume modelV2 leads every model cycle and must retain model-loop timing.
@@ -2180,7 +2328,9 @@ class RadarD:
         if ONPATH_RADAR_ADOPT:
           far_leads.append((self.radar_state.leadOnpath, 0))
         for lead, slot in far_leads:
-          floor = far_rail_vrel_floor(lead, self.far_rail_hist[slot], self.v_ego)
+          far_track = self.tracks.get(int(lead.radarTrackId)) if lead.status and lead.radar else None
+          floor = far_rail_vrel_floor(lead, self.far_rail_hist[slot], self.v_ego,
+                                      far_track.recent_range_hist if far_track is not None else None)
           if floor is not None and lead.status and lead.radar and \
              young_range_genuinely_closing(self.tracks.get(int(lead.radarTrackId)), self.v_ego):
             floor = None  # NEWBORN_RANGE_CLOSING_EXEMPT: the track's own range proves the closing
@@ -2190,6 +2340,9 @@ class RadarD:
             lead.vLead = lead.vLead + dv
             lead.vLeadK = lead.vLeadK + dv
             self.far_rail_bound_count += 1
+
+      if SLIDE_BOUND and self.honda_bosch_a_radar:
+        self._slide_bound(self.radar_state.leadOne, leads_v3[0], model_v_ego, sm.logMonoTime['modelV2'] * 1e-9)
 
       for i, lead in enumerate((self.radar_state.leadOne, self.radar_state.leadTwo)):
         if lead.status and getattr(lead, "radar", False):
@@ -2214,6 +2367,11 @@ class RadarD:
       self.starpilot_radar_state.adjacentStopped = get_adjacent_stopped(sel_tracks, sm['modelV2'])
 
     self.starpilot_toggles = get_starpilot_toggles(sm)
+
+  def _slide_bound(self, lead, vis, model_v_ego: float, t: float) -> None:
+    others = [self.radar_state.leadTwo] + ([self.radar_state.leadOnpath] if ONPATH_RADAR_ADOPT else [])
+    if self.slide_bound.step(lead, others, vis, self.v_ego + float(vis.v[0]) - model_v_ego, t):
+      self.slide_bound_count += 1
 
   def publish(self, pm: messaging.PubMaster):
     assert self.radar_state is not None
