@@ -11280,3 +11280,40 @@ leaves the reading alone when the radar's own distance really closes that fast i
 
 Unit tests: test_range_vrel_assist.py far-rail tests follow the new constants; 2 new (312 near-rail / 63 m cover, near
 closing-rail veto). selfdrive/controls/tests: all pass except 2 test_latcontrol failures that also fail on the base. Not driven.
+
+## 246. Trung sync through `dd399774070f42790e663fdb41ad6ae5c855c5ae`, including Jetlink (2026-10-09). Static/unit-test only; not driven.
+
+`[CONFIRMED by git fetch and merge]` Merge commit
+`e9bec00e49ea7786c83e4522e6bb5d7f8cbc1713` incorporates the exact fetched tip of
+`trung791997/openpilot:ns-bosch-radar-testing`,
+`dd399774070f42790e663fdb41ad6ae5c855c5ae`, without rebasing. A second fetch immediately
+before the merge commit returned the same tip. The prior local tip was
+`5ea67780a125c1f8d75b144d3a8f363d6c702b6a`; its CR-V controller, NovaSpark model and EPS
+tooling history remain in the merge ancestry.
+
+`[CONFIRMED by static inspection]` The imported Jetlink path is complete rather than a UI-only
+stub: vendored `zoompilot/jetlink` v0.8.5 at upstream `4b747aebad3d8d96ab26d76f1668f2b2ecb1b667`,
+the StarPilot adapter and two prebuilt camera warp pickles, modeld join/handoff, manager owner
+process, release-file inclusion, persistent params, Galaxy model picker, device setting, and
+offroad/onroad status UI are all present. `JetlinkLink` defaults to `0` (`off`), so merging this
+does not enable the experimental controller path. The incoming 40-held-frame handback, reliable
+big/small flag write and modeld GPU-priority changes are present.
+
+`[CONFIRMED against e9bec00e49]` Local checks on this Apple-silicon host:
+
+- Honda/opendbc suite: **424 passed**.
+- `selfdrive/modeld/tests/test_jetlink_join.py`: **8 passed**.
+- Jetlink Python sources and integration modules compile with `compileall`; the adapter binds to
+  API 2 / Jetlink 0.8.5, defaults to `off`, and finds both checked-in warp artifacts.
+- `cereal/log.capnp` and `opendbc_repo/opendbc/car/car.capnp` load successfully with pycapnp.
+- Root-config ruff is clean on `jetlink_join.py`, its test and the StarPilot adapter; both staged
+  and working-tree whitespace checks are clean. The vendored Jetlink ruff config names newer
+  `RUF103`/`RUF104` rules that this host's ruff does not understand, so it was not reported clean.
+
+`[CONFIRMED limitation]` The Mici Jetlink UI tests and the radar/longitudinal suites did not
+collect on this host because the checkout intentionally carries the comma's aarch64
+`msgq/ipc_pyx.so`, which macOS cannot load. Pillow was installed and collection was retried, so
+the remaining blocker is the architecture artifact, not the earlier missing UI dependency. The
+recorded full rebuild recipe is for x86_64 Linux and cannot be executed on this Apple-silicon
+host as written. No live Jetlink host/comma session, route replay, real radar fusion timing,
+closed-loop vehicle response or road validation was performed in this sync.
