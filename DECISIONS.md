@@ -2645,3 +2645,18 @@ the tested env arm. Testing agent (Job), COASTWIN-only A/B, 23 windows incl. the
 0.01. In 311 s84 the only other change is 86:35, sim accel -4.27 -> -4.38: radard's leadOne is identical in both arms
 there (154 differing ticks, all vRel, all in 84:13-84:21); the difference is the sim car's state carried over from
 84:21 (+0.03 m/s, -0.5 m gap).
+
+## D-117 — Show JetLink model-source state in the comma 3X onroad UI (STATUS 258, 2026-10-10, static only)
+
+**Finding:** the comma 4 (`mici`) HUD explicitly selected its eGPU icon from
+`JetlinkLink`, `JetlinkBigActive`, and `jetlink_adapter.status()`, while the comma 3X large
+UI's `ModelSourceWidget` was visible only for the older `UsbGpu` path. A working JetLink
+connection therefore had no on-device C3X icon.
+
+**Decision:** make the existing C3X model-source widget visible whenever `JetlinkLink` is
+nonzero and give JetLink priority over the legacy USB-GPU state while enabled. Match the
+C4 meanings exactly: green when the JetLink big model is active, orange when the link is
+ready but the local small model is active, pulsing while loading, and crossed when the host
+is absent or JetLink failed. Keep the prior USB-GPU path unchanged when JetLink is off.
+The existing icon footprint and placement are retained; a second overlapping status widget
+was rejected.

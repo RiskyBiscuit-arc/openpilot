@@ -6,6 +6,7 @@ import pyray as rl
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.ui.onroad.starpilot.widgets.base import LayoutWidget
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.starpilot import jetlink_adapter
 from openpilot.system.ui.lib.application import gui_app
 
 
@@ -44,6 +45,8 @@ class ModelSourceWidget(LayoutWidget):
     self._fade_time = 0.0
     self._status: ModelSourceStatus | None = None
     self._shown_status: ModelSourceStatus | None = None
+    self._jetlink_checked = 0.0
+    self._jetlink_status = None
     self._alpha_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
     self._textures = {
       status: gui_app.texture(path, *self.ICON_SIZES[status])
@@ -52,7 +55,7 @@ class ModelSourceWidget(LayoutWidget):
 
   @property
   def is_visible(self) -> bool:
-    return ui_state.usbgpu and ui_state.usbgpu_compiled
+    return bool(ui_state.jetlink_link) or (ui_state.usbgpu and ui_state.usbgpu_compiled)
 
   @property
   def blocks_pointer(self) -> bool:
@@ -75,6 +78,20 @@ class ModelSourceWidget(LayoutWidget):
       return ModelSourceStatus.FAILED
     return ModelSourceStatus.ACTIVE
 
+  @staticmethod
+  def _jetlink_status_for(status, big: bool, model_seen: bool) -> ModelSourceStatus:
+    """Match the comma 4 JetLink icon contract on the comma 3X large UI."""
+    if big and model_seen:
+      return ModelSourceStatus.ACTIVE
+    if status is None or status.reason or not status.present:
+      return ModelSourceStatus.FALLBACK_ENGAGED
+    stage = str((status.progress or {}).get("stage", ""))
+    if stage == "failed":
+      return ModelSourceStatus.FALLBACK_ENGAGED
+    if not model_seen or (stage and stage != "ready"):
+      return ModelSourceStatus.LOADING
+    return ModelSourceStatus.FAILED
+
   def _update_state(self) -> None:
     sm = ui_state.sm
     if sm.recv_frame["selfdriveState"] < ui_state.started_frame:
@@ -83,6 +100,17 @@ class ModelSourceWidget(LayoutWidget):
 
     model_seen = sm.recv_frame["modelV2"] > ui_state.started_frame
     model_alive = sm.alive["modelV2"] if model_seen else True
+    if ui_state.jetlink_link:
+      now = rl.get_time()
+      if now - self._jetlink_checked > 1.0:
+        self._jetlink_checked = now
+        try:
+          self._jetlink_status = jetlink_adapter.status()
+        except Exception:
+          self._jetlink_status = None
+      self._status = self._jetlink_status_for(self._jetlink_status, ui_state.jetlink_big, model_seen)
+      return
+
     loading = ui_state.usbgpu_loading
     big_failed = self._big_model_failed(ui_state.usbgpu_active, ui_state.usbgpu, model_seen, model_alive)
     engaged = sm["selfdriveState"].enabled

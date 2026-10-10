@@ -32,6 +32,47 @@ def test_model_source_failure_detection_matches_the_backend_state_contract():
   assert not failed(True, True, False, True)
 
 
+def test_model_source_jetlink_status_matches_comma_4_icon_contract():
+  status = model_source.ModelSourceWidget._jetlink_status_for
+
+  assert status(None, True, True) is model_source.ModelSourceStatus.ACTIVE
+  assert status(SimpleNamespace(reason=None, present=True, progress={"stage": "ready"}), False, True) is model_source.ModelSourceStatus.FAILED
+  assert status(SimpleNamespace(reason=None, present=True, progress={"stage": "build"}), False, True) is model_source.ModelSourceStatus.LOADING
+  assert status(SimpleNamespace(reason=None, present=True, progress={}), False, False) is model_source.ModelSourceStatus.LOADING
+  assert status(SimpleNamespace(reason="host error", present=True, progress={}), False, True) is model_source.ModelSourceStatus.FALLBACK_ENGAGED
+  assert status(SimpleNamespace(reason=None, present=False, progress={}), False, True) is model_source.ModelSourceStatus.FALLBACK_ENGAGED
+
+
+def test_model_source_is_visible_for_jetlink_without_legacy_usbgpu(monkeypatch):
+  monkeypatch.setattr(model_source, "ui_state", SimpleNamespace(jetlink_link=1, usbgpu=False, usbgpu_compiled=False))
+  widget = object.__new__(model_source.ModelSourceWidget)
+
+  assert widget.is_visible
+
+
+def test_model_source_reads_jetlink_status_on_comma_3x(monkeypatch):
+  widget = object.__new__(model_source.ModelSourceWidget)
+  widget._status = None
+  widget._jetlink_checked = 0.0
+  widget._jetlink_status = None
+
+  sm = FakeSubMaster(selfdrive_frame=11, model_frame=11, model_alive=True, enabled=True)
+  monkeypatch.setattr(
+    model_source,
+    "ui_state",
+    SimpleNamespace(sm=sm, started_frame=10, jetlink_link=1, jetlink_big=True),
+  )
+  ready = SimpleNamespace(reason=None, present=True, progress={"stage": "ready"})
+  monkeypatch.setattr(model_source.jetlink_adapter, "status", lambda: ready)
+  monkeypatch.setattr(model_source.rl, "get_time", lambda: 42.0)
+
+  widget._update_state()
+
+  assert widget._jetlink_status is ready
+  assert widget._jetlink_checked == 42.0
+  assert widget._status is model_source.ModelSourceStatus.ACTIVE
+
+
 def test_model_source_latches_small_model_engagement_until_the_big_model_recovers(monkeypatch):
   widget = object.__new__(model_source.ModelSourceWidget)
   widget._small_model_engaged = False
@@ -50,6 +91,7 @@ def test_model_source_latches_small_model_engagement_until_the_big_model_recover
       usbgpu_compiled=True,
       usbgpu_active=False,
       usbgpu_loading=False,
+      jetlink_link=0,
     ),
   )
   monkeypatch.setattr(model_source.rl, "get_time", lambda: 42.0)
