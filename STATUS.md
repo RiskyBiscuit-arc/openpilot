@@ -11,7 +11,8 @@ Repo: StarPilot / openpilot fork `openpilot-radar`. Working branch
 2026-09-30 and survives as tag `archive/claude/radar-testing-state-88vt2t`.) Branches deleted in that
 cleanup are cited below as their `archive/<name>` tags. For the current tip, trust `git log`, not this line.
 
-**Latest work (2026-10-10), start here:** item 258 (comma 3X JetLink onroad status icon).
+**Latest work (2026-10-10), start here:** item 259 (bind the JetLink icon to live per-frame
+big-model telemetry). Then item 258 (comma 3X JetLink onroad status icon).
 Then item 257 (synced Trung through
 `5c8eebabf9322f4738d7a1e014aba4e075759811`). Items 251-256 describe its radar and
 longitudinal changes; replay/static evidence only, not driven. Then item 250
@@ -11512,3 +11513,17 @@ Ruff and Python bytecode compilation pass for the widget and its tests. The focu
 cannot collect on this Apple-silicon Mac because importing `ui_state` loads the checked-in
 comma aarch64 `msgq/ipc_pyx.so`. No rendered C3X UI, live JetLink host/model handoff, comma
 installation, or road validation was performed.
+
+## 259. JetLink icon now follows the model output's live big/small source (D-118, 2026-10-10). Static only.
+
+`[CONFIRMED against 8d9ac0a907 by static inspection and schema/unit tests]` `modeld` publishes
+`starpilotModelV2.bigModelActive` after each inference from the same `Joined.big` state that
+identifies which model produced the output. UIState subscribes to that message and uses it
+for the green JetLink icon once seen in the current drive; `JetlinkBigActive` remains a
+startup/compatibility fallback and is also now updated after inference.
+
+The Cap'n Proto schema loads successfully, `bigModelActive @3` is the next unused ordinal and
+round-trips as a boolean. The JetLink join suite passes **8 tests**; Python compilation,
+fatal/error-class ruff checks, and `git diff --check` pass. The focused rendered-UI test still
+cannot collect on this Apple-silicon host because the checkout contains the comma's aarch64
+`msgq/ipc_pyx.so`. No live JetLink handoff, rendered comma 3X UI, or road validation was run.
