@@ -11,7 +11,8 @@ Repo: StarPilot / openpilot fork `openpilot-radar`. Working branch
 2026-09-30 and survives as tag `archive/claude/radar-testing-state-88vt2t`.) Branches deleted in that
 cleanup are cited below as their `archive/<name>` tags. For the current tip, trust `git log`, not this line.
 
-**Latest work (2026-10-09), start here:** item 249 (synced Trung through
+**Latest work (2026-10-09), start here:** item 250 (added the missing offroad-only
+Galaxy JetLink mode selector). Then item 249 (synced Trung through
 `e57eecf4e0`, adding the two coast-resume smoothers and coast wheel color; audited the
 existing Jetlink UI surfaces). Then item 246 (merged Trung's complete Jetlink port). Then item 225
 (radar: why the lead goes camera-only; the far-range D-057 re-anchor lockout from
@@ -11360,3 +11361,24 @@ aarch64 `msgq/ipc_pyx.so`. Ruff was run on all changed code and is not clean: it
 findings in the Honda controller and nine in the planner/test set; no automatic cleanup was
 mixed into this sync. No route replay, live Jetlink/comma connection, real radar fusion
 timing, closed-loop vehicle response or road validation was performed here.
+
+## 250. Galaxy Developer settings can enable JetLink (D-110, 2026-10-09). Static/API-test only; not driven.
+
+`[CONFIRMED by static inspection and API tests]` Commit
+`6d89936d5e6d026c86c913aa4cc610fd7d0d3a7d` adds an advanced `JetLink` dropdown to
+Galaxy's Developer section with `Off`, `USB`, and `iOS`, backed by the same persistent
+`JetlinkLink` integer used by the comma's native Developer screen. It is hidden until
+Galaxy Developer Mode is enabled and locked by both Galaxy clients while onroad. The server
+independently enforces Developer Mode, rejects every onroad write, accepts only integer
+values 0/1/2, and returns authoritative typed readback. The declared/default value remains
+0 (`Off`), so installing the update cannot turn JetLink on by itself. This supersedes item
+249's static finding that Galaxy could not enable the link.
+
+`[CONFIRMED against 6d89936d5e]` Galaxy layout, frontend-static and parameter API suites:
+**92 passed**; JetLink model-join suite: **8 passed**. JSON validation, whitespace checks,
+and fatal/error-class ruff rules pass on all changed files. Full-file ruff remains non-clean
+because `the_galaxy.py` and its older dashboard test already contain unrelated style findings;
+they were not mechanically rewritten as part of this control. The Galaxy test stubs were
+extended for current Honda and Panda imports so the parameter API suite can collect on this
+Apple-silicon host without loading the checked-in aarch64 device artifacts. No live Galaxy
+browser, comma, Mac JetLink host, model handoff, route replay, or road validation was run.
