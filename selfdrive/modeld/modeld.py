@@ -1488,12 +1488,6 @@ def main(demo=False):
       model.in_control = jetlink_adapter.in_control(sm)
       model.frame_drop_ratio = frame_drop_ratio
       handovers = getattr(model, 'handovers', 0)
-      if model.big != jetlink_big_published:
-        jetlink_big_published = model.big
-        try:  # display only: a params build without the key must not stop the model
-          params.put_bool("JetlinkBigActive", jetlink_big_published)
-        except Exception:
-          cloudlog.exception("JetlinkBigActive write failed")
 
     mt1 = time.perf_counter()
     try:
@@ -1594,6 +1588,13 @@ def main(demo=False):
 
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
+    jetlink_big_active = bool(jetlink_joined and isinstance(model, Joined) and model.big)
+    if jetlink_big_active != jetlink_big_published:
+      jetlink_big_published = jetlink_big_active
+      try:  # compatibility/display fallback only; live UI reads starpilotModelV2.bigModelActive
+        params.put_bool("JetlinkBigActive", jetlink_big_published)
+      except Exception:
+        cloudlog.exception("JetlinkBigActive write failed")
     if jetlink_joined and getattr(model, 'handovers', 0) != handovers:
       run_count = 0
       frame_drop_ratio = 0.
@@ -1658,6 +1659,7 @@ def main(demo=False):
       starpilot_modelv2_send.starpilotModelV2.turnDirection = DH.turn_direction
       starpilot_modelv2_send.starpilotModelV2.desire = int(DH.desire)
       starpilot_modelv2_send.starpilotModelV2.navDesire = int(DH.nav_desire)
+      starpilot_modelv2_send.starpilotModelV2.bigModelActive = jetlink_big_active
       drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
       drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
 

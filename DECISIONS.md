@@ -2660,3 +2660,18 @@ ready but the local small model is active, pulsing while loading, and crossed wh
 is absent or JetLink failed. Keep the prior USB-GPU path unchanged when JetLink is off.
 The existing icon footprint and placement are retained; a second overlapping status widget
 was rejected.
+
+## D-118 — Bind the JetLink green icon to the model output's live big-model flag (STATUS 259, 2026-10-10, static only)
+
+**Finding:** D-117 inherited the comma 4 implementation's `JetlinkBigActive` parameter.
+`modeld` wrote that parameter before `Joined.run()`, but the JetLink handoff can occur inside
+that call. The displayed frame and the filesystem flag could therefore disagree, and the
+status/progress path could keep the loading icon visible while a big-model frame was being
+used. JetLink's own joining code identifies the per-frame `model.big` value as authoritative.
+
+**Decision:** publish `bigModelActive @3 :Bool` in `StarPilotModelDataV2` after inference and
+have UIState use that live message whenever it has been seen during the current onroad
+session. Move the compatibility `JetlinkBigActive` write after inference as well, retaining
+it only for startup and older consumers. The new ordinal is the next unused ordinal in that
+struct. No model inputs, outputs, handoff decisions, controller behavior, or fallback rules
+change; this is display telemetry only.

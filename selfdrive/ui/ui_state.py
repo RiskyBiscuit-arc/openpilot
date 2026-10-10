@@ -71,6 +71,7 @@ class UIState:
     self.sm = messaging.SubMaster(
       [
         "modelV2",
+        "starpilotModelV2",
         "controlsState",
         "onroadEvents",
         "liveCalibration",
@@ -264,7 +265,9 @@ class UIState:
     self.usbgpu_active = params.get_bool("UsbGpuActive")
     self.usbgpu_loading = params.get_bool("UsbGpuLoading")
     self.jetlink_link = params.get_int("JetlinkLink") or 0
-    self.jetlink_big = params.get_bool("JetlinkBigActive") if self.jetlink_link else False
+    jetlink_model_seen = self.sm.recv_frame["starpilotModelV2"] > self.started_frame
+    self.jetlink_big = (bool(self.sm["starpilotModelV2"].bigModelActive) if self.jetlink_link and jetlink_model_seen
+                        else params.get_bool("JetlinkBigActive") if self.jetlink_link else False)
     self.switchback_mode_enabled = self.live_params.get_bool("SwitchbackModeEnabled") if self.started else False
     self.conditional_status = self.live_params.get_int("CEStatus", default=0) if self.started else 0
     mark_progress("ui.update.after_state_params")

@@ -148,6 +148,7 @@ struct StarPilotModelDataV2 @0x80ae746ee2596b11 {
   turnDirection @0 :TurnDirection;
   desire @1 :UInt8;     # log.Desire value fed to the driving model for the next frame
   navDesire @2 :UInt8;  # log.Desire the navigation route asked for (none unless it can act)
+  bigModelActive @3 :Bool;  # this published frame came from JetLink's big model
 
   enum TurnDirection {
     none @0;
