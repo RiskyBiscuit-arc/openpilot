@@ -11,8 +11,9 @@ Repo: StarPilot / openpilot fork `openpilot-radar`. Working branch
 2026-09-30 and survives as tag `archive/claude/radar-testing-state-88vt2t`.) Branches deleted in that
 cleanup are cited below as their `archive/<name>` tags. For the current tip, trust `git log`, not this line.
 
-**Latest work (2026-10-10), start here:** items 251-256 (Trung's radar and longitudinal
-updates through `5c8eebabf9`; replay/static evidence only, not driven). Then item 250
+**Latest work (2026-10-10), start here:** item 257 (synced Trung through
+`5c8eebabf9322f4738d7a1e014aba4e075759811`). Items 251-256 describe its radar and
+longitudinal changes; replay/static evidence only, not driven. Then item 250
 (added the missing offroad-only Galaxy JetLink mode selector). Then item 249 (synced Trung through
 `e57eecf4e0`, adding the two coast-resume smoothers and coast wheel color; audited the
 existing Jetlink UI surfaces). Then item 246 (merged Trung's complete Jetlink port). Then item 225
@@ -11475,3 +11476,25 @@ reads as matching stock Bosch-A ACC with light brake taps; the coasts removed in
 and lagged. It now fits the last 1.0 s. Closed-loop replay: -1.77 -> -1.44 (car -1.60), braking ~3 s earlier, min TTC
 4.9 -> 7.0 s. Testing agent: 21 of 23 windows identical, 2 within 0.01; 311 86:35 sim -4.27 -> -4.38 is sim carry-over
 with identical radar input. Tests: 3 new in `test_bosch_a_coast_fit_window.py`; Bosch-A radar tests 175 pass. Lint clean.
+
+## 257. Trung sync through `5c8eebabf9322f4738d7a1e014aba4e075759811` (2026-10-10). Static/unit-test only; not driven.
+
+`[CONFIRMED against f57fe22df0 by merge ancestry and static inspection]` The exact current
+`trung/ns-bosch-radar-testing` tip is an ancestor. The merge retains the Galaxy
+`JetlinkLink` selector from D-110 and adopts D-111 through D-116, including removal of the
+superseded StockBrakeFeel coasts/resume cap, the lift-only far-rail and slide bounds, the
+one-second coast range-fit window, the C4 60 fps correction, and qcamera fetching. Incoming
+decision/status numbers were remapped to the next unused local numbers; source references
+were updated with them.
+
+`[CONFIRMED by unit tests]` The Honda/opendbc suite passes **425 tests** and the JetLink
+model-join suite passes **8 tests**. The three Galaxy layout/dashboard/parameter files have
+**153 passes and 2 failures**; both failures are pre-existing dashboard filesystem timestamp
+tests in an untouched file, not the JetLink layout or parameter API. Fatal/error-class ruff
+checks pass on the changed Python files, JSON validation and `git diff --check` pass.
+
+The radard and longitudinal consumer suites cannot collect on this Apple-silicon host because
+the checkout contains the comma's aarch64 `msgq/ipc_pyx.so`; no local native rebuild, route
+replay, live radar/fusion timing, closed-loop vehicle response, comma/JetLink handoff, or road
+validation was performed. The incoming radar and braking claims remain bound to Trung's
+recorded replay evidence and source commit, not to this merge validation.
