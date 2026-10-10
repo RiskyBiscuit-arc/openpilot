@@ -1630,10 +1630,30 @@ def test_far_rail_bound_covers_route_298_bm3():
 
 def test_far_rail_bound_needs_far_railed_radar_lead():
   hist = _far_hist()
-  assert radard.far_rail_vrel_floor(_far_lead(d_rel=79.0), _far_hist(x=79.0 + radard.RADAR_TO_CAMERA), 21.5) is None
-  assert radard.far_rail_vrel_floor(_far_lead(v_rel=RAIL + 0.1), hist, 21.5) is None   # off the rail: U11 is a reading
+  d = radard.FAR_RAIL_MIN_D_REL_M - 1.0
+  assert radard.far_rail_vrel_floor(_far_lead(d_rel=d), _far_hist(x=d + radard.RADAR_TO_CAMERA), 21.5) is None
+  off_rail = RAIL + radard.FAR_RAIL_NEAR_RAIL_MARGIN_MPS + 0.1
+  assert radard.far_rail_vrel_floor(_far_lead(v_rel=off_rail), hist, 21.5) is None   # off the rail: U11 is a reading
   assert radard.far_rail_vrel_floor(_far_lead(radar=False), hist, 21.5) is None
   assert radard.far_rail_vrel_floor(_far_lead(status=False), hist, 21.5) is None
+
+
+def test_far_rail_bound_covers_route_312_near_rail_and_nearer_leads():
+  # D-096, route 00000312: 1405.8 held -11.1 (raw 65, 0.9 m/s off the -12.0 rail) at ~80 m with the range opening;
+  # 609.8 held -12.0 at ~63 m with the range flat. Both missed the old exact-rail, >= 80 m test.
+  floor = radard.far_rail_vrel_floor(_far_lead(d_rel=80.0, v_rel=RAIL + 0.9, v_range=0.5),
+                                     _far_hist(x=80.0 + radard.RADAR_TO_CAMERA, v=29.0), 30.0)
+  assert floor == pytest.approx(29.0 - 30.0 - radard.FAR_RAIL_MARGIN_MPS)
+  floor = radard.far_rail_vrel_floor(_far_lead(d_rel=63.0, v_range=0.0),
+                                     _far_hist(x=63.0 + radard.RADAR_TO_CAMERA, v=27.0), 29.0)
+  assert floor == pytest.approx(27.0 - 29.0 - radard.FAR_RAIL_MARGIN_MPS)
+
+
+def test_far_rail_bound_range_veto_keeps_a_near_closing_rail():
+  # 311 2490.0-like: a railed lead at 60 m whose own range closes at -14 while the camera still lags at -2.
+  hist = _far_hist(x=60.0 + radard.RADAR_TO_CAMERA, v=27.0)
+  assert radard.far_rail_vrel_floor(_far_lead(d_rel=60.0, v_range=-14.0), hist, 29.0) is None
+  assert radard.far_rail_vrel_floor(_far_lead(d_rel=60.0, v_rel=RAIL + 0.8, v_range=-14.0), hist, 29.0) is None
 
 
 def test_far_rail_bound_needs_a_steady_camera_match():
@@ -1701,3 +1721,67 @@ class TestOffRailArmingOff:
     for i in range(21):
       fresh.update(d_of(i * DT), 0.0, v_rel, 30.0 + v_rel, True, True, t_now=i * DT, range_assist=True)
     assert fresh.range_assist_correction == 0.0
+
+
+def cam_gate_series(track, n, *, d0, range_rate, v_rel, cam_rate, v_ego=V_EGO):
+  """Off-rail sweeps with a matched camera range for the camera-gated off-rail arming; returns the corrections."""
+  out = []
+  for i in range(n):
+    t = i * DT
+    d = d0 + range_rate * t
+    cam = d0 + cam_rate * t
+    track.update(d, 0.0, v_rel, v_ego + v_rel, True, True, t_now=t, range_assist=True,
+                 camera_sample=(t, None, cam))
+    out.append(track.range_assist_correction)
+  return out
+
+
+class TestOffRailCameraGate:
+  """2026-10-07, REPLAY only (000002f5, 2e2/2e1/236/2d5 open loop): off-rail arming needs the camera's own range trend."""
+  KW = dict(d0=107.0, range_rate=-10.6, v_rel=-6.6)   # 2e2 4:44 shape, as in TestOffRailArmingOff
+
+  @pytest.fixture(autouse=True)
+  def _gate(self, monkeypatch):
+    monkeypatch.setattr(radard, "RANGE_VREL_ASSIST_OFF_RAIL", False)
+
+  def test_camera_closing_with_the_range_arms(self):
+    out = cam_gate_series(new_track(v_lead=V_EGO - 6.6), SETTLE + 30, cam_rate=-10.6, **self.KW)
+    assert max(out) > RANGE_VREL_ASSIST_MIN_DISAGREEMENT_MPS
+
+  def test_camera_flat_does_not_arm(self):
+    # 2f5 661/1052/1866: the range closed 4-5 m/s faster than U11, the camera range did not move.
+    out = cam_gate_series(new_track(v_lead=V_EGO - 6.6), SETTLE + 30, cam_rate=-6.6, **self.KW)
+    assert max(out) == 0.0
+
+  def test_no_camera_does_not_arm(self):
+    track = new_track(v_lead=V_EGO - 6.6)
+    assert peak(track, SETTLE + 30, **self.KW) == 0.0
+
+  def test_control_gate_bypassed_arms_on_the_flat_camera(self, monkeypatch):
+    # Control for test_camera_flat_does_not_arm: with the camera check forced true the same series arms.
+    monkeypatch.setattr(radard.Track, "_off_rail_cam_ok", lambda self: True)
+    out = cam_gate_series(new_track(v_lead=V_EGO - 6.6), SETTLE + 30, cam_rate=-6.6, **self.KW)
+    assert max(out) > 0.0
+
+  def test_correction_is_smoothed_off_the_rail(self):
+    # The first published correction is a fraction of the ~4 m/s disagreement, not a step to it.
+    out = cam_gate_series(new_track(v_lead=V_EGO - 6.6), SETTLE + 30, cam_rate=-10.6, **self.KW)
+    first = next(c for c in out if c > 0.0)
+    assert first <= 4.0 * DT / radard.RANGE_VREL_OFF_RAIL_SMOOTH_TAU_S + 1e-6
+    steps = np.diff(out)
+    assert np.max(np.abs(steps)) < 1.0
+
+  def test_a_cleared_correction_fades_out(self):
+    # 2f5 343.25: one clearing update stepped a 5.5 m/s correction to zero and re-armed the next update.
+    track = new_track(v_lead=V_EGO - 6.6)
+    out = cam_gate_series(track, SETTLE + 30, cam_rate=-10.6, **self.KW)
+    before = out[-1]
+    assert before > 1.0
+    fades = []
+    for i in range(SETTLE + 30, SETTLE + 60):
+      t = i * DT
+      track.update(107.0 - 10.6 * t, 0.0, -6.6, V_EGO - 6.6, True, True, t_now=t, range_assist=False)
+      fades.append(track.range_assist_correction)
+    assert 0.0 < fades[0] < before
+    assert all(b <= a for a, b in zip(fades, fades[1:]))
+    assert fades[-1] == 0.0
