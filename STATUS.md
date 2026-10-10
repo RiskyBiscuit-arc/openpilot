@@ -11015,3 +11015,56 @@ Unit tests: 2 new in test_brake_onset.py (41 passed).
 
 The hold cut route 313's gas flicker (70 -> 35 cuts in replay) but the flicker is not felt: median 10 gas units before a
 cut, aEgo through the short cuts within noise (-0.004 / +0.066 / -0.005 m/s^2). Reverted for the root cause (D-099).
+
+## 236. StockBrakeFeel lead coast and ease coast removed (D-100). Replay + static only, not driven.
+
+Owner reported a 5-10 s speed swing (nausea) on route 00000313. Same-traffic closed-loop replay over the whole drive
+(242 windows, 2.6 h; fidelity car-vs-log: swing corr 0.99, v RMSE median 0.11 m/s) put it on StockBrakeFeel's coasts:
+the D-091 lead coast capped the target at a full coast (-0.33..-0.5) for a need of ~0.07 and held it until the closing
+ended, so the car fell back and caught up again; with it removed alone, the D-092 ease coast took its place.
+
+| 313 whole drive (aEgo 0.08-0.25 Hz band RMS) | swing | brake (<-0.45) s | min gap/follow p10 |
+|---|---|---|---|
+| SBF off | 0.105 | 542 | 0.54 |
+| SBF on, with coasts | 0.141 | 664 | 0.58 |
+| SBF on, D-100 build (rsw_v100) | 0.100 | 415 | 0.54 |
+
+Leave-one-out: removing D-086 cap, D-080 newborn bound or stop ease alone changes nothing (0.141). 5 recent routes (298,
+305, 308, 311, 312; 23 windows, 898 s, fidelity 0.95): 0.171 vs on 0.179 / off 0.174, brake 164 / 172 / 169 s. One
+window worse: 312 13:26 cut-in at 47 m with a bad first lead speed brakes to -3.2 (off -2.3); isolated to the D-086
+cap (delayed then deeper), which the coasts hid by keeping a larger gap. Open, not changed here.
+
+Logs (313): gas, gas-off and brake deliver the same decel per command bin and switch equally smoothly; light slowing
+(to about -0.3) is already gas easing, firmer is a light brake, as stock does. Brake lights on 10.0 % of the time
+(SBF off 10.4, old SBF 3.9); short taps 1.5 / 10 min in all three.
+
+Removed: lead coast, ease coast, coast_resume_cap (D-098), carcontroller lead-coast gas-off and `actuators.coast` from
+controlsd; `leadCoast` -> `leadCoastDEPRECATED`. Kept: D-086 cap, D-080, stop ease, D-097 gas ramp. Tests: 26 coast
+tests removed; the remaining failures (5 lead_geometry, 4 import errors) are the same on the base. Lint: no new errors.
+
+## 237. Far railed lead: own-range bound when the camera roughly agrees, coasted range veto lift-only (D-101). Replay + static only, not driven.
+
+Phantom brakes on 313 (38:45.7, 54:46.1, 81:15.5) and 312 23:33 came from a far Bosch-A track on the U11 -12 rail
+whose own ranges were flat or opening while the camera saw a lead at ego speed. D-096 missed them: the camera range was
+outside its 8 % match, or the range veto read a `vRelRangeDerived` frozen through the coast.
+
+| Event | shipped | D-101 | car |
+|---|---|---|---|
+| 313 38:50 | -1.91 | -1.14 | -1.94 |
+| 313 54:51 | -1.77 | -0.60 | -1.79 |
+| 313 81:25 | -1.37 | -0.47 | -2.32 |
+| 312 23:33 | -1.57 | -1.00 | -2.14 |
+
+17 replay groups, fidelity (shipped vs car command) corr 0.83-0.999 (298 0.27, older build). Other groups are unchanged,
+including 312 13:26 (D-086 cut-in) and 312 13:34. The coasted veto is lift-only: the first version removed a D-096
+bound at 312 13:34 (range converging onto the camera read as -11 m/s) and braked -1.67 against shipped -1.45.
+
+Replay tool fix: radard's `v_ego_hist` must be seeded with vEgo before the first update. Cold, the first track gets
+vLead = vRel, which made a -3.5 phantom in replay at 313 81:17 that never happened on the car.
+
+Tests: 12 new in `test_range_vrel_assist.py`, 181 pass. Lint: no new errors. Protected real-brake routes:
+- 17 events were replayed by the testing agent. 16 are identical on and off.
+- On 263 at 5:58.6, D-101 brakes up to 1.49 m/s² less (min -1.61 against -1.70; the car was -1.48).
+- At that point the lead is railed at -12 and coasted, at 78 m (3.5 s). The range opened from 77.9 m to 87.4 m, and the
+  bound stays at or below the range fit.
+- Replay fidelity is weak there (corr 0.37). See D-101.
