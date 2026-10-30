@@ -38,8 +38,10 @@ def test_interface_keys():
   op = adapter.adapter()
   assert adapter.owner_config().adapter == adapter.__name__
   assert op.keys.link == "JetlinkMode"
-  # nothing writes a big-model slot or catalog: jetlink's default model, so a fresh Jetson is provisioned
-  assert op.keys.big_model is None and op.keys.catalog is None
+  # the owner's pick and refresh_catalog()'s catalog, both StarPilot JSON params (params_keys.h)
+  assert op.keys.big_model == "JetlinkBigModel" and op.keys.catalog == "JetlinkCatalog"
+  from jetlink.registry.catalog import REQUIRED_SELECTOR_VERSION
+  assert op.catalog_selector == REQUIRED_SELECTOR_VERSION
 
 
 def test_guard_answers_link_off_without_a_usable_jetlink():
@@ -208,6 +210,95 @@ def test_the_small_models_history_clears_in_place(layout):
       assert not any(array.any() for array in npy.values())
       assert not queues["packed_npy_inputs"].numpy().any()
       assert not small.prev_desire.any()
+
+
+class _FreshCompileGuard:
+  # stands in for the driving role's USBProtection fresh guard: any compile or kernel launch while it is
+  # installed is an "Unexpected fresh QCOM submission" on the car. Every module binding is replaced, since
+  # tinygrad imports these by name
+  NAMES = ("lower_and_compile", "compile_linear", "run_linear", "hcq_compile")
+
+  def __init__(self, monkeypatch):
+    import sys
+    from tinygrad.engine import jit, realize
+    from tinygrad.runtime.support import hcq2
+    self.calls = []
+    originals = {getattr(realize, n, None) for n in self.NAMES} | {getattr(hcq2, n, None) for n in self.NAMES}
+    originals.discard(None)
+    for module in list(sys.modules.values()):
+      if module is None or not getattr(module, "__name__", "").startswith("tinygrad"):
+        continue
+      for name in self.NAMES:
+        if getattr(module, name, None) in originals:
+          monkeypatch.setattr(module, name, self._refuse(f"{module.__name__}.{name}"))
+    monkeypatch.setattr(jit.TinyJit, "__call__", self._refuse("TinyJit.__call__"))
+
+  def _refuse(self, where):
+    def refuse(*args, **kwargs):
+      self.calls.append(where)
+      raise ValueError(f"Unexpected fresh QCOM submission ({where})")
+    return refuse
+
+
+def _history_layout(layout):
+  from tinygrad import Device
+  from openpilot.starpilot.models import compile as catalog
+  return {"split": lambda: catalog.make_split_input_queues(VISION, POLICY, 2, Device.DEFAULT),
+          "supercombo": lambda: catalog.make_supercombo_input_queues({**VISION, **POLICY}, 2, Device.DEFAULT),
+          "stateful": lambda: catalog.make_stateful_input_queues(STATEFUL, Device.DEFAULT)}[layout]()
+
+
+@pytest.mark.parametrize("layout", ["split", "supercombo", "stateful"])
+def test_the_attach_reset_compiles_nothing_under_the_driving_guard(layout, monkeypatch):
+  # Every boot since route 00000004: small_reset -> reset_queues -> TinyJit clear() compiled a fresh kernel
+  # inside the driving guard, the attach failed and Jetlink never joined. Capture and reset must both
+  # run with the guard installed, keep the buffers the run JIT captured, and leave every history at zero
+  from tinygrad.helpers import Context
+  from openpilot.starpilot.models.runner import CatalogModelState
+
+  with Context(DEV="CPU"):
+    queues, npy = _history_layout(layout)
+    small = CatalogModelState.__new__(CatalogModelState)
+    small.input_queues, small.npy, small.prev_desire = queues, npy, np.ones(8, dtype=np.float32)
+    history = [name for name, q in queues.items() if q.device != "NPY" and name not in adapter.FRAME_INPUTS]
+    assert history
+    buffers = {name: q.uop.base.buffer for name, q in queues.items()}
+    frames = {name: bytes(buffers[name].as_memoryview()) for name in adapter.FRAME_INPUTS if name in buffers}
+
+    guard = _FreshCompileGuard(monkeypatch)
+    reset = adapter.adapter().small_reset(small)  # captured inside prepare(), under the guard
+    assert callable(reset)
+    for _ in range(3):
+      for name in history:  # what the big model's drive left behind, written without a kernel
+        buffers[name].allocator._copyin(buffers[name]._buf, memoryview(np.full(buffers[name].nbytes, 7, dtype=np.uint8)))
+      for array in npy.values():
+        array.fill(3)
+      small.prev_desire.fill(1)
+      reset()
+      assert guard.calls == []
+      assert {name: q.uop.base.buffer for name, q in queues.items()} == buffers
+      for name in history:
+        assert not any(buffers[name].as_memoryview()), name
+      assert not any(array.any() for array in npy.values())
+      assert not small.prev_desire.any()
+      for name, before in frames.items():
+        assert bytes(buffers[name].as_memoryview()) == before, name
+
+
+def test_the_old_jit_reset_trips_the_driving_guard(monkeypatch):
+  # positive control: the guard above does catch jetlink's TinyJit reset, the cause of the attach failure
+  from tinygrad.helpers import Context
+  from jetlink.openpilot.warp import reset_queues
+
+  with Context(DEV="CPU"):
+    queues, npy = _history_layout("split")
+    history = [q for name, q in queues.items() if q.device != "NPY" and name not in adapter.FRAME_INPUTS]
+    guard = _FreshCompileGuard(monkeypatch)
+    with pytest.raises(ValueError, match="Unexpected fresh QCOM submission"):
+      reset = reset_queues(history, npy.values(), np.ones(8, dtype=np.float32))
+      if reset is not None:
+        reset()
+    assert guard.calls
 
 
 def test_the_reset_reads_what_the_catalog_runner_keeps():

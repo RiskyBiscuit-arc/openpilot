@@ -380,6 +380,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ReprojectSessionActive", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION | DONT_LOG, BOOL}},
     {"JetlinkMode", {PERSISTENT, INT, "0"}},
     {"JetlinkChargePhone", {PERSISTENT, BOOL, "0"}},
+    {"JetlinkBigModel", {PERSISTENT, JSON}},  // owner-picked Jetson big model; unset = jetlink default
+    {"JetlinkCatalog", {PERSISTENT | DONT_LOG, JSON}},
     {"JetlinkSpec", {PERSISTENT | DONT_LOG, JSON}},
     {"JetlinkPointers", {PERSISTENT | DONT_LOG, JSON}},
     {"JetlinkProgress", {CLEAR_ON_MANAGER_START | DONT_LOG, JSON}},
